@@ -61,6 +61,14 @@ namespace Ridge.CPU
             _mode = ProcessorMode.Kernel;
             _pc = 0x3e000;
             _sr[11] = 1;
+
+            // From the "RESET" section on page 6-6:
+            // "SR2 = Memory size"  (TODO: is this in bytes, or what?)          
+            // "SR14 = 1 (no PCB)"
+            _sr[2] = _mem.Size;
+            _sr[14] = 1;
+
+
         }
 
         public uint PC
@@ -85,6 +93,16 @@ namespace Ridge.CPU
 
         public void Execute()
         {
+            //
+            // Decode the current instruction.
+            // The eventual intent is to cache these Instruction objects
+            // to save execution time; for the time being we cons up a new one each
+            // time around which is slow and causes GCs, but is simple while we get
+            // this thing off the ground.
+            //
+            
+            // Save PC pre-increment.
+            uint opc = _pc;
             Instruction i = new Instruction(_mem, _pc);
             _pc += i.Length;
 
@@ -142,8 +160,10 @@ namespace Ridge.CPU
                 case Opcode.CBIT:
                     {
                         // Clears the specified bit in the 64-bit register pair specified by Rx.
+                        // NB: Ridge numbers its bits in the opposite of the modern convention;
+                        // the MSB is bit 0, LSB is 63...
                         ulong rp = GetRegisterPairValue(i.Rx);
-                        rp &= ~((ulong)0x1 << (i.Ry & 0x3f));
+                        rp &= ~((ulong)0x8000000000000000 >> (i.Ry & 0x3f));
                         SetRegisterPairValue(i.Rx, rp);                        
                     }
                     break;
@@ -152,7 +172,7 @@ namespace Ridge.CPU
                     {
                         // Sets the specified bit in the 64-bit register pair specified by Rx.
                         ulong rp = GetRegisterPairValue(i.Rx);
-                        rp |= ((ulong)0x1 << (i.Ry & 0x3f));
+                        rp |= ((ulong)0x8000000000000000 >> (i.Ry & 0x3f));
                         SetRegisterPairValue(i.Rx, rp);                        
                     }
                     break;
@@ -161,14 +181,14 @@ namespace Ridge.CPU
                     {
                         // Sets bit 31 of Rx to the value of the selected bit; clears all other bits in Rx.
                         ulong rp = GetRegisterPairValue(i.Rx);
-                        _r[i.Rx] = (uint)((rp & ((ulong)0x1 << (i.Ry & 0x3f))) == 0 ? 0 : 1);                        
+                        _r[i.Rx] = (uint)((rp & ((ulong)0x8000000000000000 >> (i.Ry & 0x3f))) == 0 ? 0 : 1);
                     }
                     break;
 
                 case Opcode.CHK:
                     // Trap if Rx > Ry
                     // TODO: manual conflicts on this, actually...
-                    if (_r[i.Rx] > _r[i.Ry])
+                    if ((int)_r[i.Rx] > (int)_r[i.Ry])
                     {
                         Trap(TrapType.Check);
                     }
@@ -192,7 +212,7 @@ namespace Ridge.CPU
 
                 case Opcode.MPY_i:
                     _r[i.Rx] *= (uint)i.Ry;
-                    break;                
+                    break;
 
                 case Opcode.NOT_i:
                     // TODO: does this get masked to 4 bits?
@@ -205,7 +225,7 @@ namespace Ridge.CPU
 
                 case Opcode.CHK_i:
                     // Trap if NOT (0 <= (Rx) <= Ry)
-                    if (!(0 <= _r[i.Rx] && _r[i.Rx] <= i.Ry))
+                    if (!(0 <= (int)_r[i.Rx] && (int)_r[i.Rx] <= i.Ry))
                     {
                         Trap(TrapType.Check);
                     }
@@ -265,6 +285,7 @@ namespace Ridge.CPU
                     }
 
                     _pc = _sr[15];
+                    _mode = ProcessorMode.User;
                     break;
 
                 case Opcode.LDREGS:
@@ -322,8 +343,16 @@ namespace Ridge.CPU
                             // "
 
                             // TODO: actually interface to all the above things.
-                            // Right now, just return 0 for everything...
+                            // Right now, just return 0 for everything, this indicates
+                            // that the load enable switch is off (so we just get dumped into RBUG)
                             _r[i.Rx] = 0;
+                            break;
+
+                        case MaintOpcode.TRAPEXIT:
+                            // "The TRAPEXIT instruction sets PC to the value contained in SR0 and begins
+                            //  executing at that address...
+                            //  The TRAPEXIT instruction flushes the cache and the TMT."
+                            _pc = _sr[0];
                             break;
 
                         case MaintOpcode.ITEST:
@@ -372,32 +401,32 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.TEST_gt:
-                    _r[i.Rx] = (uint)((_r[i.Rx] > _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] > (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_lt:
-                    _r[i.Rx] = (uint)((_r[i.Rx] < _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] < (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_eq:
-                    _r[i.Rx] = (uint)((_r[i.Rx] == _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] == (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.CALLR:
                     _r[i.Rx] = _pc;     // + 2 already added in
-                    _pc = _pc + _r[i.Ry] - 2;  // remove + 2 added in
+                    _pc = opc + _r[i.Ry];  // remove + 2 added in
                     break;
 
                 case Opcode.TEST_gti:
-                    _r[i.Rx] = (uint)((_r[i.Rx] > i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] > i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_lti:
-                    _r[i.Rx] = (uint)((_r[i.Rx] < i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] < i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_eqi:
-                    _r[i.Rx] = (uint)((_r[i.Rx] == i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] == i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.RET:
@@ -409,15 +438,15 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.TEST_lteq:
-                    _r[i.Rx] = (uint)((_r[i.Rx] <= _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] <= (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_gteq:
-                    _r[i.Rx] = (uint)((_r[i.Rx] >= _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] >= (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_neq:
-                    _r[i.Rx] = (uint)((_r[i.Rx] != _r[i.Ry]) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] != (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
                 case Opcode.KCALL:
@@ -425,15 +454,15 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.TEST_lteqi:
-                    _r[i.Rx] = (uint)((_r[i.Rx] <= i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] <= i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_gteqi:
-                    _r[i.Rx] = (uint)((_r[i.Rx] >= i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] >= i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.TEST_neqi:
-                    _r[i.Rx] = (uint)((_r[i.Rx] != i.Ry) ? 1 : 0);
+                    _r[i.Rx] = (uint)(((int)_r[i.Rx] != i.Ry) ? 1 : 0);
                     break;
 
                 case Opcode.LSL:
@@ -587,7 +616,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_gts:
                 case Opcode.BR_gtl:
-                    if (_r[i.Rx] > _r[i.Ry])
+                    if ((int)_r[i.Rx] > (int)_r[i.Ry])
                     {
                         _pc = i.BranchAddress;
                     }
@@ -595,7 +624,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_eqs:
                 case Opcode.BR_eql:
-                    if (_r[i.Rx] == _r[i.Ry])
+                    if ((int)_r[i.Rx] == (int)_r[i.Ry])
                     {
                         _pc = i.BranchAddress;
                     }
@@ -609,7 +638,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_gtsi:
                 case Opcode.BR_gtli:
-                    if (_r[i.Rx] > i.Ry)
+                    if ((int)_r[i.Rx] > i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
@@ -617,7 +646,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_ltsi:
                 case Opcode.BR_ltli:
-                    if (_r[i.Rx] < i.Ry)
+                    if ((int)_r[i.Rx] < i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
@@ -625,7 +654,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_eqsi:
                 case Opcode.BR_eqli:
-                    if (_r[i.Rx] == i.Ry)
+                    if ((int)_r[i.Rx] == i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
@@ -643,7 +672,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_lteqs:
                 case Opcode.BR_lteql:
-                    if (_r[i.Rx] <= _r[i.Ry])
+                    if ((int)_r[i.Rx] <= (int)_r[i.Ry])
                     {
                         _pc = i.BranchAddress;
                     }
@@ -651,7 +680,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_neqs:
                 case Opcode.BR_neql:
-                    if (_r[i.Rx] != _r[i.Ry])
+                    if ((int)_r[i.Rx] != (int)_r[i.Ry])
                     {
                         _pc = i.BranchAddress;
                     }
@@ -664,7 +693,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_lteqsi:
                 case Opcode.BR_lteqli:
-                    if (_r[i.Rx] <= i.Ry)
+                    if ((int)_r[i.Rx] <= i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
@@ -672,7 +701,7 @@ namespace Ridge.CPU
 
                 case Opcode.BR_gteqsi:
                 case Opcode.BR_gteqli:
-                    if (_r[i.Rx] >= i.Ry)
+                    if ((int)_r[i.Rx] >= i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
@@ -680,12 +709,17 @@ namespace Ridge.CPU
 
                 case Opcode.BR_neqsi:
                 case Opcode.BR_neqli:
-                    if (_r[i.Rx] != i.Ry)
+                    if ((int)_r[i.Rx] != i.Ry)
                     {
                         _pc = i.BranchAddress;
                     }
                     break;
 
+                //
+                // TODO for all LOAD/STORE instructions --
+                // Data Alignment traps for LOAD/STORE operations not on
+                // the correct data-size boundary.
+                //
                 case Opcode.STOREB_s:
                 case Opcode.STOREB_l:
                     _mem.WriteByte((uint)i.Displacement, (byte)_r[i.Rx]);
@@ -693,9 +727,7 @@ namespace Ridge.CPU
 
                 case Opcode.STOREB_sx:
                 case Opcode.STOREB_lx:
-                    // TODO: in general for indexing -- is Ry treated as
-                    // signed or unsigned?  Manuals do not specify.
-                    _mem.WriteByte((uint)(i.Displacement + _r[i.Ry]), (byte)_r[i.Rx]);
+                    _mem.WriteByte((uint)(i.Displacement + (int)_r[i.Ry]), (byte)_r[i.Rx]);
                     break;
 
                 case Opcode.STOREH_s:
@@ -705,7 +737,7 @@ namespace Ridge.CPU
 
                 case Opcode.STOREH_sx:
                 case Opcode.STOREH_lx:
-                    _mem.WriteHalfWord((uint)(i.Displacement + _r[i.Ry]), (ushort)_r[i.Rx]);
+                    _mem.WriteHalfWord((uint)(i.Displacement + (int)_r[i.Ry]), (ushort)_r[i.Rx]);
                     break;
 
                 case Opcode.STORE_s:
@@ -715,7 +747,7 @@ namespace Ridge.CPU
 
                 case Opcode.STORE_sx:
                 case Opcode.STORE_lx:
-                    _mem.WriteWord((uint)(i.Displacement + _r[i.Ry]), _r[i.Rx]);
+                    _mem.WriteWord((uint)(i.Displacement + (int)_r[i.Ry]), _r[i.Rx]);
                     break;
 
                 case Opcode.STORED_s:
@@ -725,7 +757,7 @@ namespace Ridge.CPU
 
                 case Opcode.STORED_sx:
                 case Opcode.STORED_lx:
-                    _mem.WriteDoubleWord((uint)(i.Displacement + _r[i.Ry]), GetRegisterPairValue(i.Rx));
+                    _mem.WriteDoubleWord((uint)(i.Displacement + (int)_r[i.Ry]), GetRegisterPairValue(i.Rx));
                     break;
 
                 case Opcode.LOADB_ds:
@@ -735,7 +767,7 @@ namespace Ridge.CPU
 
                 case Opcode.LOADB_dsx:
                 case Opcode.LOADB_dlx:
-                    _r[i.Rx] = _mem.ReadByte((uint)(i.Displacement + _r[i.Ry]));
+                    _r[i.Rx] = _mem.ReadByte((uint)(i.Displacement + (int)_r[i.Ry]));
                     break;
 
                 case Opcode.LOADH_ds:
@@ -745,7 +777,7 @@ namespace Ridge.CPU
 
                 case Opcode.LOADH_dsx:
                 case Opcode.LOADH_dlx:
-                    _r[i.Rx] = _mem.ReadHalfWord((uint)(i.Displacement + _r[i.Ry]));
+                    _r[i.Rx] = _mem.ReadHalfWord((uint)(i.Displacement + (int)_r[i.Ry]));
                     break;
 
                 case Opcode.LOAD_ds:
@@ -755,7 +787,7 @@ namespace Ridge.CPU
 
                 case Opcode.LOAD_dsx:
                 case Opcode.LOAD_dlx:
-                    _r[i.Rx] = _mem.ReadWord((uint)(i.Displacement + _r[i.Ry]));
+                    _r[i.Rx] = _mem.ReadWord((uint)(i.Displacement + (int)_r[i.Ry]));
                     break;
 
                 case Opcode.LOADD_ds:
@@ -765,7 +797,7 @@ namespace Ridge.CPU
 
                 case Opcode.LOADD_dsx:
                 case Opcode.LOADD_dlx:
-                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(i.Displacement + _r[i.Ry])));
+                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(i.Displacement + (int)_r[i.Ry])));
                     break;
 
                 case Opcode.LADDR_ds:
@@ -775,62 +807,63 @@ namespace Ridge.CPU
 
                 case Opcode.LADDR_dsx:
                 case Opcode.LADDR_dlx:
-                    _r[i.Rx] = (uint)(i.Displacement + _r[i.Ry]);
+                    _r[i.Rx] = (uint)(i.Displacement + (int)_r[i.Ry]);
                     break;
 
                 case Opcode.LOADB_cs:
                 case Opcode.LOADB_cl:
-                    _r[i.Rx] = _mem.ReadByte((uint)(_pc + i.Displacement));
+                    _r[i.Rx] = _mem.ReadByte((uint)(opc + i.Displacement));
                     break;
 
                 case Opcode.LOADB_csx:
                 case Opcode.LOADB_clx:
-                    _r[i.Rx] = _mem.ReadByte((uint)(_pc + _r[i.Ry] + i.Displacement));
+                    _r[i.Rx] = _mem.ReadByte((uint)(opc + (int)_r[i.Ry] + i.Displacement));
                     break;
 
                 case Opcode.LOADH_cs:
                 case Opcode.LOADH_cl:
-                    _r[i.Rx] = _mem.ReadHalfWord((uint)(_pc + i.Displacement));
+                    _r[i.Rx] = _mem.ReadHalfWord((uint)(opc + i.Displacement));
                     break;
 
                 case Opcode.LOADH_csx:
                 case Opcode.LOADH_clx:
-                    _r[i.Rx] = _mem.ReadHalfWord((uint)(_pc + _r[i.Ry] + i.Displacement));
+                    _r[i.Rx] = _mem.ReadHalfWord((uint)(opc + (int)_r[i.Ry] + i.Displacement));
                     break;
 
                 case Opcode.LOAD_cs:
                 case Opcode.LOAD_cl:
-                    _r[i.Rx] = _mem.ReadWord((uint)(_pc + i.Displacement));
+                    _r[i.Rx] = _mem.ReadWord((uint)(opc + i.Displacement));
                     break;
 
                 case Opcode.LOAD_csx:
                 case Opcode.LOAD_clx:
-                    _r[i.Rx] = _mem.ReadWord((uint)(_pc + _r[i.Ry] + i.Displacement));
+                    _r[i.Rx] = _mem.ReadWord((uint)(opc + (int)_r[i.Ry] + i.Displacement));
                     break;
 
                 case Opcode.LOADD_cs:
                 case Opcode.LOADD_cl:
-                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(_pc + i.Displacement)));
+                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(opc + i.Displacement)));
                     break;
 
                 case Opcode.LOADD_csx:
                 case Opcode.LOADD_clx:
-                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(_pc + _r[i.Ry] + i.Displacement)));
+                    SetRegisterPairValue(i.Rx, _mem.ReadDoubleWord((uint)(opc + (int)_r[i.Ry] + i.Displacement)));
                     break;
 
                 case Opcode.LADDR_cs:
                 case Opcode.LADDR_cl:
-                    _r[i.Rx] = (uint)(_pc + i.Displacement);
+                    _r[i.Rx] = (uint)(opc + i.Displacement);
                     break;
 
                 case Opcode.LADDR_csx:
                 case Opcode.LADDR_clx:
-                    _r[i.Rx] = (uint)(_pc + _r[i.Ry] + i.Displacement);
+                    _r[i.Rx] = (uint)(opc + (int)_r[i.Ry] + i.Displacement);
                     break;
 
                 default:
                     // Should eventually Trap.  Throw at the moment while debugging.
-                    throw new NotImplementedException("Unimplemented opcode.");
+                    throw new NotImplementedException(
+                        String.Format("Unimplemented opcode {0}.", i.Op));
                     break;
             }
         }

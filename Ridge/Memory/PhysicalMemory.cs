@@ -17,6 +17,11 @@ namespace Ridge.Memory
             _mem = new byte[size * 1024];
         }
 
+        public uint Size
+        {
+            get { return (uint)_mem.Length; }
+        }
+
         public byte ReadByte(uint address)
         {
             if (address < _mem.Length)

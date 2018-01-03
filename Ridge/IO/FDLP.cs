@@ -42,6 +42,7 @@ namespace Ridge.IO
 
         public void Clock()
         {
+            // TODO: all of this is 100% bogus.
             if (_handshakeCounter > 0)
             {
                 _handshakeCounter--;
@@ -55,14 +56,15 @@ namespace Ridge.IO
 
             _hack--;
 
+            // Real dirty hack for RBUG console input
             if (_hack == 0)
             {
                 _hack = 1000;
 
                 if (Console.KeyAvailable)
                 {
-                    int k = Console.Read();
-                    uint ioir = (uint)(0x01880000 | (k << 8));
+                    ConsoleKeyInfo k = Console.ReadKey(true);
+                    uint ioir = (uint)(0x01880000 | (k.KeyChar << 8));
                     _cpu.Interrupt(ioir);
                 }
             }
@@ -94,16 +96,17 @@ namespace Ridge.IO
             //
             //
 
-            // 00-7F: write one character on port 0 - handshake is by bit 30
-            //        (special order only used by RBUG).
+            
             uint command = (data >> 24);
 
+            // 00-7F: write one character on port 0 - handshake is by bit 30
+            //        (special order only used by RBUG).
             if (command < 0x80)
             {
                 //Console.WriteLine("{0} - {1}", command, (char)command);
                 Console.Write((char)command);
                 _handshake = false;
-                _handshakeCounter = 100000;
+                _handshakeCounter = 1000;
             }
 
             return 0;

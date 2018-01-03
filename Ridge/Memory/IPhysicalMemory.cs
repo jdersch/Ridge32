@@ -11,6 +11,8 @@ namespace Ridge.Memory
     /// </summary>
     public interface IPhysicalMemory
     {
+        uint Size { get;  }
+
         byte ReadByte(uint address);
         ushort ReadHalfWord(uint address);
         uint ReadWord(uint address);

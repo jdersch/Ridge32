@@ -38,6 +38,7 @@ namespace Ridge.CPU
         SBIT        = 0x0d,
         TBIT        = 0x0e,
         CHK         = 0x0f,
+
         NOP         = 0x10,
         MOVE_i      = 0x11,
         ADD_i       = 0x13,
@@ -46,6 +47,7 @@ namespace Ridge.CPU
         NOT_i       = 0x18,
         AND_i       = 0x1b,
         CHK_i       = 0x1f,
+
         FIXT        = 0x20,
         FIXR        = 0x21,
         RNEG        = 0x22,
@@ -61,6 +63,7 @@ namespace Ridge.CPU
         ESUB        = 0x2d,
         EMPY        = 0x2e,
         EDIV        = 0x2f,
+
         DFIXT       = 0x30,
         DFIXR       = 0x31,
         DRNEG       = 0x32,
@@ -73,6 +76,7 @@ namespace Ridge.CPU
         DFLOAT      = 0x39,
         DRCOMP      = 0x3a,
         TRAP        = 0x3b,
+
         SUS         = 0x40,
         LUS         = 0x41,
         RUM         = 0x42,
@@ -84,6 +88,7 @@ namespace Ridge.CPU
         MAINT       = 0x4c,
         READ        = 0x4e,
         WRITE       = 0x4f,
+
         TEST_gt     = 0x50,
         TEST_lt     = 0x51,
         TEST_eq     = 0x52,
@@ -99,6 +104,7 @@ namespace Ridge.CPU
         TEST_lteqi  = 0x5c,
         TEST_gteqi  = 0x5d,
         TEST_neqi   = 0x5e,
+
         LSL         = 0x60,
         LSR         = 0x61,
         ASL         = 0x62,
@@ -107,6 +113,7 @@ namespace Ridge.CPU
         DLSR        = 0x65,
         CSL         = 0x68,
         SEB         = 0x6a,
+
         LSL_i       = 0x70,
         LSR_i       = 0x71,
         ASL_i       = 0x72,
@@ -130,6 +137,7 @@ namespace Ridge.CPU
         BR_lteqsi   = 0x8c,
         BR_gteqsi   = 0x8d,
         BR_neqsi    = 0x8e,
+
         BR_gtl      = 0x90,
         BR_eql      = 0x92,
         CALL_l      = 0x93,
@@ -143,6 +151,7 @@ namespace Ridge.CPU
         BR_lteqli   = 0x9c,
         BR_gteqli   = 0x9d,
         BR_neqli    = 0x9e,
+
         STOREB_s    = 0xa0,
         STOREB_sx   = 0xa1,
         STOREH_s    = 0xa2,
@@ -151,6 +160,7 @@ namespace Ridge.CPU
         STORE_sx    = 0xa7,
         STORED_s    = 0xa8,
         STORED_sx   = 0xa9,
+
         STOREB_l    = 0xb0,
         STOREB_lx   = 0xb1,
         STOREH_l    = 0xb2,
@@ -159,6 +169,7 @@ namespace Ridge.CPU
         STORE_lx    = 0xb7,
         STORED_l    = 0xb8,
         STORED_lx   = 0xb9,
+
         LOADB_ds    = 0xc0,
         LOADB_dsx   = 0xc1,
         LOADH_ds    = 0xc2,
@@ -169,6 +180,7 @@ namespace Ridge.CPU
         LOADD_dsx   = 0xc9,
         LADDR_ds    = 0xce,
         LADDR_dsx   = 0xcf,
+
         LOADB_dl    = 0xd0,
         LOADB_dlx   = 0xd1,
         LOADH_dl    = 0xd2,
@@ -179,6 +191,7 @@ namespace Ridge.CPU
         LOADD_dlx   = 0xd9,
         LADDR_dl    = 0xde,
         LADDR_dlx   = 0xdf,
+
         LOADB_cs    = 0xe0,
         LOADB_csx   = 0xe1,
         LOADH_cs    = 0xe2,
@@ -189,6 +202,7 @@ namespace Ridge.CPU
         LOADD_csx   = 0xe9,
         LADDR_cs    = 0xee,
         LADDR_csx   = 0xef,
+
         LOADB_cl    = 0xf0,
         LOADB_clx   = 0xf1,
         LOADH_cl    = 0xf2,
