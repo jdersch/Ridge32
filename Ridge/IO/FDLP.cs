@@ -34,29 +34,33 @@ namespace Ridge.IO
     /// </summary>
     public class FDLP : IIODevice
     {
-        public FDLP(IPhysicalMemory mem, Processor cpu)
+        public FDLP(byte deviceId, RidgeSystem sys)
+        {
+            _sys = sys;
+            _mem = sys.Memory;
+            _deviceId = deviceId;
+
+            // Character send callback used for handshaking between ridge/fdlp when sending
+            // single characters.  appx. 833333ns per character at 9600 baud.
+            _characterOutEvent = new Event(_characterOutTimeNsec, null, CharacterOutCallback);
+        }
+
+        public bool Interrupt
+        {
+            get { return _interrupt; }
+        }        
+
+        public uint AckInterrupt()
         {            
-            _mem = mem;
-            _cpu = cpu;            
+            _interrupt = false;
+            return _ioir;
         }
 
         public void Clock()
         {
-            // TODO: all of this is 100% bogus.
-            if (_handshakeCounter > 0)
-            {
-                _handshakeCounter--;
-
-                if (_handshakeCounter == 0)
-                {
-                    _handshake = true;
-                }
-            }
-
-
             _hack--;
 
-            // Real dirty hack for RBUG console input
+            // Real dirty hack for RBUG console input for now
             if (_hack == 0)
             {
                 _hack = 1000;
@@ -64,28 +68,28 @@ namespace Ridge.IO
                 if (Console.KeyAvailable)
                 {
                     ConsoleKeyInfo k = Console.ReadKey(true);
-                    uint ioir = (uint)(0x01880000 | (k.KeyChar << 8));
-                    _cpu.Interrupt(ioir);
+                    _ioir = (uint)(0x01880000 | (k.KeyChar << 8));
+                    _interrupt = true;
+
+                    _lastUnit = 8;
                 }
             }
         }
 
-        public uint Read(uint deviceData, out uint data)
+        public uint Read(uint addressWord, out uint data)
         {
-            if (_handshake)
-            {
-                _handshake = false;
-                data = 0x0;
-            }
-            else
-            {
-                data = 0x2;
-            }
+            //
+            // "The FDLP returns its device number and last interrupting unit in the
+            // following format:
+            //  0         7 8         15       30    31
+            //  | device # | last unit |      | H/S | |
+            //
+            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));            
 
             return 0;
         }
 
-        public uint Write(uint deviceData, uint data)
+        public uint Write(uint addressWord, uint data)
         {
             //
             // The FDLP uses no information from the WRITE address word other
@@ -93,11 +97,10 @@ namespace Ridge.IO
             //
             // The most significant byte of the I/O Write Data Word ("data")
             // contains the command byte:
-            //
-            //
-
-            
+            //            
             uint command = (data >> 24);
+
+            Console.WriteLine("command {0:x}", command);
 
             // 00-7F: write one character on port 0 - handshake is by bit 30
             //        (special order only used by RBUG).
@@ -105,20 +108,39 @@ namespace Ridge.IO
             {
                 //Console.WriteLine("{0} - {1}", command, (char)command);
                 Console.Write((char)command);
-                _handshake = false;
-                _handshakeCounter = 1000;
+                _handshake = 1;
+
+                // Schedule handshake event
+                _characterOutEvent.TimestampNsec = _characterOutTimeNsec;
+                _sys.Scheduler.Schedule(_characterOutEvent);
             }
 
             return 0;
         }
 
-        private bool _handshake;
-        private int _handshakeCounter;
+        private void CharacterOutCallback(ulong timeNsec, ulong skewNsec, object context)
+        {
+            // Reset handshake.
+            _handshake = 0;
+        }
+
+        private bool _interrupt;
+        private uint _ioir;
+
+        private int _lastUnit;
+        private int _handshake;
 
         private int _hack = 1000;
 
-        private IPhysicalMemory _mem;
-        private Processor _cpu;
+        private RidgeSystem _sys;
+        private IPhysicalMemory _mem;        
+        private byte _deviceId;
+
+        //
+        // Device events
+        //
+        private Event _characterOutEvent;
+        private ulong _characterOutTimeNsec = 833333;
 
         private const uint _dcbAddress = 0x3c000;
     }

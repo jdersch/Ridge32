@@ -16,7 +16,7 @@ namespace Ridge.IO
         /// <param name="data"></param>
         /// <param name="status"></param>
         /// <returns></returns>
-        uint Read(uint deviceData, out uint data);
+        uint Read(uint addressWord, out uint data);
 
         /// <summary>
         /// Sends an I/O write request to the specified device.
@@ -25,8 +25,12 @@ namespace Ridge.IO
         /// <param name="deviceData"></param>
         /// <param name="data"></param>
         /// <returns></returns>
-        uint Write(uint deviceData, uint data);
+        uint Write(uint addressWord, uint data);
 
         void Clock();
+
+        bool Interrupt { get;  }
+
+        uint AckInterrupt();
     }
 }

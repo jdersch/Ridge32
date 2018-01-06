@@ -22,6 +22,23 @@ namespace Ridge.CPU
         ArithmeticTrap,
     }
 
+    public enum EventType
+    {
+        KCALL =                0x000,
+        DataAlignment        = 0x400,
+        IllegalInstruction   = 0x404,
+        DoubleBitParityFetch = 0x408,
+        DoubleBitParityExecute = 0x40c,
+        PageFault            = 0x410,
+        KernelViolation      = 0x414,
+        CheckTrap            = 0x418,
+        ArithmeticTrap       = 0x41c,
+        ExternalInterrupt    = 0x420,
+        Switch0Interrupt     = 0x424,
+        PowerFailWarning     = 0x428,
+        Timer1Interrupt      = 0x430,
+        Timer2Interrupt      = 0x434,
+    }
 
     /// <summary>
     /// The main Ridge CPU.
@@ -94,13 +111,35 @@ namespace Ridge.CPU
         public void Execute()
         {
             //
+            // Check for pending external interrupts.
+            _intDevice = _io.InterruptRequested();
+
+            if (_intDevice != null)
+            {
+                //
+                // Yes, we have an external interrupt.
+                // Signal an event and do what needs to be done...
+                //
+                SignalEvent(EventType.ExternalInterrupt);
+
+                //
+                // Set the external interrupt flag.  This is used by the ITEST
+                // MAINT instruction to allow polling for interrupts in Kernel mode.
+                // I am unsure if this is an accurate representation of
+                // the actual Ridge behavior, the documentation is 
+                // unclear.
+                //
+                _externalInterrupt = true;
+            }            
+
+            //
             // Decode the current instruction.
             // The eventual intent is to cache these Instruction objects
             // to save execution time; for the time being we cons up a new one each
             // time around which is slow and causes GCs, but is simple while we get
             // this thing off the ground.
             //
-            
+
             // Save PC pre-increment.
             uint opc = _pc;
             Instruction i = new Instruction(_mem, _pc);
@@ -356,11 +395,13 @@ namespace Ridge.CPU
                             break;
 
                         case MaintOpcode.ITEST:
-                            if (_interrupt)
-                            {
-                                _interrupt = false;
-                                _r[(i.Rx + 1) & 0xf] = _ioir;
+                            if (_externalInterrupt)
+                            {                                
+                                _r[(i.Rx + 1) & 0xf] = _sr[0];
                                 _r[i.Rx] = 1;
+
+                                // clear the interrupt flip flop.
+                                _externalInterrupt = false;
                             }
                             else
                             {
@@ -868,15 +909,6 @@ namespace Ridge.CPU
             }
         }
 
-        /// <summary>
-        /// This is currently completely wrong.
-        /// </summary>
-        public void Interrupt(uint ioir)
-        {
-            _interrupt = true;
-            _ioir = ioir;
-        }
-
         private ulong GetRegisterPairValue(int rp)
         {
             return ((ulong)_r[rp] << 32) | _r[(rp + 1) & 0xf];
@@ -886,6 +918,50 @@ namespace Ridge.CPU
         {
             _r[rp] = (uint)(value >> 32);
             _r[(rp + 1) & 0xf] = (uint)value;
+        }
+
+        private void SignalEvent(EventType e)
+        {
+            //
+            // Do event-specific things, like setting SR0-SR3.
+            //
+            switch (e)
+            {
+                case EventType.ExternalInterrupt:
+                    _sr[0] = _intDevice.AckInterrupt();
+                    _sr[15] = _pc;
+                    break;
+
+                case EventType.Switch0Interrupt:
+                    _sr[0] = _mode == ProcessorMode.Kernel ? _pc : 1;
+                    if (_mode == ProcessorMode.User)
+                    {
+                        _sr[15] = _pc;
+                    }
+                    break;
+            }
+
+            //
+            // Grab the vector for the event from the CCB.
+            // TODO: the documentation is *extremely vague*
+            // but it appears that external interrupts are not vectored from the CCB
+            // while in Kernel mode, only in User mode.  
+            // It does appear that SR registers are still modified as appropriate.
+            //
+            // Ayway, we were going to grab the vector for the event
+            // from the CCB, the offset of which is specified by
+            // SR11.
+            //            
+            if (e != EventType.ExternalInterrupt || 
+                _mode == ProcessorMode.User)
+            {
+                uint vectorAddress = _mem.ReadWord(_sr[11] + (uint)e);
+
+                // Switch to Kernel mode and jump to the requisite vector.
+                _mode = ProcessorMode.Kernel;
+                _pc = vectorAddress;
+            }
+
         }
 
         private void Trap(TrapType t)
@@ -906,10 +982,17 @@ namespace Ridge.CPU
         private uint _pc;
 
         private IPhysicalMemory _mem;
-        private IOBus           _io;
+        private IOBus           _io;    
+        
+        //
+        // The currently interrupting external device
+        //
+        private IIODevice       _intDevice;
 
-        // Interrupt stuff
-        private uint _ioir;
-        private bool _interrupt;
+        //
+        // Whether an external interrupt has occurred since the last
+        // ITEST MAINT instruction.
+        //
+        private bool            _externalInterrupt;
     }
 }

@@ -7,7 +7,7 @@ namespace Ridge
     {
         static void Main(string[] args)
         {
-            System system = new System();
+            RidgeSystem system = new RidgeSystem();
             system.Reset();
 
             Console.WriteLine("Yet-To-Be-Named Ridge emulator v0.0.\n");
@@ -34,7 +34,7 @@ namespace Ridge
             }
         }
 
-        private static void PrintStatus(System s)
+        private static void PrintStatus(RidgeSystem s)
         {
             Console.WriteLine("PC=0x{0:x8} Mode={1}", s.CPU.PC, s.CPU.Mode);
             for (int i = 0; i < 16; i++)
