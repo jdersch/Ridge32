@@ -1,6 +1,8 @@
 ﻿using System;
 using System.IO;
 
+using Ridge.Debugger;
+
 namespace Ridge
 {
     class Program
@@ -9,6 +11,8 @@ namespace Ridge
         {
             RidgeSystem system = new RidgeSystem();
             system.Reset();
+
+            Console.CancelKeyPress += OnBreak;
 
             Console.WriteLine("Yet-To-Be-Named Ridge emulator v0.0.\n");
 
@@ -24,51 +28,53 @@ namespace Ridge
                 system.Memory.WriteByte(0x3e000 + i, buffer[i]);
             }
 
+            DebugPrompt debugger = new DebugPrompt(system);
+            _execState = ExecutionState.Debug;
+
             while (true)
-            {
-                //PrintStatus(system);
-                system.Clock();
+            {                
+                switch(_execState)
+                {
+                    case ExecutionState.Debug:
+                        _execState = debugger.Prompt();
+                        break;
 
-                //Console.ReadKey();
-                //Console.WriteLine();
-            }
+                    case ExecutionState.Step:
+                        system.Clock();
+                        _execState = ExecutionState.Debug;
+                        break;
+
+                    case ExecutionState.Go:
+                        //try
+                        {
+                            system.Clock();
+                        }
+                        //catch(Exception e)
+                        {
+                        //    Console.WriteLine("Execution error: {0}", e.Message);
+                          //  _execState = ExecutionState.Debug;
+                        }
+                        break;
+
+                }
+
+                if (system.CPU.PC == 0x0)
+                {
+                    _execState = ExecutionState.Step;
+                }
+            }            
         }
 
-        private static void PrintStatus(RidgeSystem s)
+        private static void OnBreak(object sender, ConsoleCancelEventArgs e)
         {
-            Console.WriteLine("PC=0x{0:x8} Mode={1}", s.CPU.PC, s.CPU.Mode);
-            for (int i = 0; i < 16; i++)
-            {
-                Console.Write("R{0}=0x{1:x8} ", i, s.CPU.R[i]);
-                if (i == 7)
-                {
-                    Console.WriteLine();
-                }
-            }
+            //
+            // break into the debugger.
+            //
+            _execState = ExecutionState.Debug;
 
-            Console.WriteLine();
-
-            for (int i = 0; i < 16; i++)
-            {
-                Console.Write("S{0}=0x{1:x8} ", i, s.CPU.SR[i]);
-                if (i == 7)
-                {
-                    Console.WriteLine();
-                }
-            }
-
-            CPU.Instruction inst = new CPU.Instruction(s.Memory, s.CPU.PC);
-
-            Console.WriteLine();
-
-            if (inst.Length == 4)
-            {
-                Console.WriteLine("{0:x8} {1}", s.Memory.ReadWord(s.CPU.PC), Ridge.CPU.Disassembler.Disassemble(inst));
-            }
-            else
-            {
-                Console.WriteLine("{0:x8},{1:x4} {2}", s.Memory.ReadWord(s.CPU.PC), s.Memory.ReadHalfWord(s.CPU.PC+4), Ridge.CPU.Disassembler.Disassemble(inst));
-            }
+            e.Cancel = true;            
         }
+
+        private static ExecutionState _execState;
     }
 }

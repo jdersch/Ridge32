@@ -45,6 +45,7 @@ namespace Ridge.IO
                 // a device timeout.
                 // Bit 31 : "0" is OK, "1" is I/O device not ready to accept command.
                 // Bit 30 : "0" is OK, "1" is device timed out and did not respond.
+                Console.WriteLine("Nonexistent device {0:x} on read.", address);
                 data = 0;
                 return 0x3;
             }
@@ -63,6 +64,7 @@ namespace Ridge.IO
                 // a device timeout.
                 // Bit 31 : "0" is OK, "1" is I/O device not ready to accept command.
                 // Bit 30 : "0" is OK, "1" is device timed out and did not respond.
+                Console.WriteLine("Nonexistent device {0:x} on write.", address);
                 data = 0;
                 return 0x3;
             }

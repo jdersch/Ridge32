@@ -58,8 +58,6 @@ namespace Ridge.Memory
             {
                 _mem[address] = b;
             }
-
-            //Console.WriteLine("{0:x8} - {1:x2}", address, b);
         }
 
         public void WriteHalfWord(uint address, ushort h)

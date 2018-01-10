@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 
 using Ridge.CPU;
 using Ridge.Memory;
+using Ridge.IO.Disk;
+using System.IO;
 
 namespace Ridge.IO
 {
@@ -42,7 +44,13 @@ namespace Ridge.IO
 
             // Character send callback used for handshaking between ridge/fdlp when sending
             // single characters.  appx. 833333ns per character at 9600 baud.
-            _characterOutEvent = new Event(_characterOutTimeNsec, null, CharacterOutCallback);
+            _characterOutEvent = new Event(0, null, CharacterOutCallback);
+            _floppyActionEvent = new Event(0, null, FloppyActionCallback);
+
+            using (FileStream fs = new FileStream("Disks\\SUS.img", FileMode.Open, FileAccess.Read))
+            {
+                _floppyDisk = new FloppyDisk(fs);
+            }
         }
 
         public bool Interrupt
@@ -71,7 +79,7 @@ namespace Ridge.IO
                     _ioir = (uint)(0x01880000 | (k.KeyChar << 8));
                     _interrupt = true;
 
-                    _lastUnit = 8;
+                    _lastUnit = 0;
                 }
             }
         }
@@ -100,8 +108,7 @@ namespace Ridge.IO
             //            
             uint command = (data >> 24);
 
-            Console.WriteLine("command {0:x}", command);
-
+            uint ret = 0;
             // 00-7F: write one character on port 0 - handshake is by bit 30
             //        (special order only used by RBUG).
             if (command < 0x80)
@@ -113,15 +120,128 @@ namespace Ridge.IO
                 // Schedule handshake event
                 _characterOutEvent.TimestampNsec = _characterOutTimeNsec;
                 _sys.Scheduler.Schedule(_characterOutEvent);
+
+                ret = 0;    // This should always succeed.
+            }
+            else
+            {                
+                switch(command)
+                {
+                    case 0x86:  // Start I/O to left floppy
+                        ret = StartFloppy(0);
+                        break;
+
+                    case 0xff:  // Undocumented...
+                        break;
+
+                    default:
+                        Console.WriteLine("Unimplemented FDLP command {0:x2}", command);
+                        break;
+                }
             }
 
-            return 0;
+            return ret;
+        }
+
+        private uint StartFloppy(int drive)
+        {
+            uint ret = 0;
+
+            //
+            // Read the floppy disc DCB -- this starts at offset 0x0c.
+            //
+            uint dcbOffset = _dcbAddress + 0xc0;
+            byte gOrder = _mem.ReadByte(dcbOffset);
+            byte sOrder = _mem.ReadByte(dcbOffset + 1);
+
+            uint ridgeAddress = _mem.ReadWord(dcbOffset + 5) >> 8;
+            ushort byteCount = _mem.ReadHalfWord(dcbOffset + 8);
+            byte necOrder = _mem.ReadByte(dcbOffset + 0xc);
+
+            byte headUnit = _mem.ReadByte(dcbOffset + 0xd);
+            byte cylinder = _mem.ReadByte(dcbOffset + 0xe);
+            byte sector = _mem.ReadByte(dcbOffset + 0xf);
+
+            Console.WriteLine("gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
+                gOrder, sOrder, ridgeAddress, byteCount, necOrder);
+
+            Console.WriteLine("head/Unit {0:x} cyl {1:x} sector {2:x}", headUnit, cylinder, sector);
+
+            switch(sOrder)
+            {
+                case 0:
+                    DoRead(ridgeAddress, byteCount, headUnit, cylinder, sector);
+                    break;
+
+                default:
+                    throw new NotImplementedException(
+                        String.Format("Unhandled GORDER {0:x}", gOrder));
+            }
+
+            return ret;
+        }
+
+        private void DoRead(uint ridgeAddress, ushort byteCount, byte headUnit, byte cylinder, byte sector)
+        {
+            int unit = headUnit & 0x3;
+            int head = (headUnit & 0x4) >> 2;
+
+            sector--;       // sector is 1-indexed
+
+            int bytesRead = 0;
+
+            while(bytesRead < byteCount)
+            {
+                byte[] sectorData = _floppyDisk.ReadSector(cylinder, head, sector);
+
+                for(uint i=0;i<sectorData.Length;i++)
+                {
+                    _mem.WriteByte(ridgeAddress++, sectorData[i]);
+                }
+
+                bytesRead += sectorData.Length;
+
+                sector++;
+
+                if (sector > 15)
+                {
+                    sector = 0;
+
+                    head++;
+
+                    if (head > 1)
+                    {
+                        head = 0;
+                        cylinder++;
+                    }
+                }
+            }
+
+            // Schedule completion interrupt.
+            //_floppyActionEvent.TimestampNsec = _floppyActionTimeNsec;
+            //_sys.Scheduler.Schedule(_floppyActionEvent);
+            //_handshake = 0;
+            //_lastUnit = 0;
+
+            Console.WriteLine(_interrupt);
+            _ioir = 0x01860000;
+            _interrupt = true;
+            _lastUnit = 6;
+
         }
 
         private void CharacterOutCallback(ulong timeNsec, ulong skewNsec, object context)
         {
             // Reset handshake.
             _handshake = 0;
+        }
+
+        private void FloppyActionCallback(ulong timeNsec, ulong skewNsec, object context)
+        {
+            _ioir = 0x01860000;
+            _interrupt = true;
+
+            _lastUnit = 0;
         }
 
         private bool _interrupt;
@@ -140,7 +260,15 @@ namespace Ridge.IO
         // Device events
         //
         private Event _characterOutEvent;
-        private ulong _characterOutTimeNsec = 833333;
+        private ulong _characterOutTimeNsec = 833333 / 100;
+
+        private Event _floppyActionEvent;
+        private ulong _floppyActionTimeNsec = 833333;
+
+        //
+        // Floppy data
+        //
+        private FloppyDisk _floppyDisk;
 
         private const uint _dcbAddress = 0x3c000;
     }

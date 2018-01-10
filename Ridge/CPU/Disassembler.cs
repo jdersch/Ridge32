@@ -96,19 +96,19 @@ namespace Ridge.CPU
                     disassembly = String.Format("{0} r{1},r{2}", mnemonic, i.Rx, i.Ry);
                     break;
 
-                case Opcode.MOVE_i:
-                case Opcode.ADD_i:
-                case Opcode.SUB_i:
-                case Opcode.MPY_i:
-                case Opcode.AND_i:
-                case Opcode.CHK_i:
-                case Opcode.LSL_i:
-                case Opcode.DLSL_i:
-                case Opcode.LSR_i:
-                case Opcode.DLSR_i:
-                case Opcode.ASL_i:
-                case Opcode.ASR_i:
-                case Opcode.CSL_i:
+                case Opcode.MOVEI_i:
+                case Opcode.ADDI_i:
+                case Opcode.SUBI_i:
+                case Opcode.MPYI_i:
+                case Opcode.ANDI_i:
+                case Opcode.CHKI_i:
+                case Opcode.LSLI_i:
+                case Opcode.DLSLI_i:
+                case Opcode.LSRI_i:
+                case Opcode.DLSRI_i:
+                case Opcode.ASLI_i:
+                case Opcode.ASRI_i:
+                case Opcode.CSLI_i:
                     disassembly = String.Format("{0} r{1},0x{2:x1}", mnemonic, i.Rx, i.Ry);
                     break;
 
@@ -283,7 +283,7 @@ namespace Ridge.CPU
 
         private static string GetLength(Instruction i)
         {
-            return i.Length == 4 ? String.Empty : ",L";
+            return i.Length == 6 ? ",L" : String.Empty;
         }
 
         private static string GetLogicalOp(Opcode op)

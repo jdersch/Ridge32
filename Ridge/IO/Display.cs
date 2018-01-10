@@ -55,7 +55,9 @@ namespace Ridge.IO
             // 128kb of framebuffer.
             _framebuffer = new uint[32768];           
 
-            _display = new DisplayWindow();            
+            _display = new DisplayWindow();
+
+            _hack = 1000000;
 
             _frameEvent = new Event(_frameTimeNsec, null, FrameCompleteCallback);
             _sys.Scheduler.Schedule(_frameEvent);
@@ -77,11 +79,12 @@ namespace Ridge.IO
             // Real dirty hack for RBUG console input for now
             if (_hack == 0)
             {
-                _hack = 1000;
+                _hack = 250;
 
                 if (_display.KeyAvailable)
+                //if ((_status == 0xc)
                 {
-                    _key++;
+                    _key = _display.GetKey();                    
 
                     // keyboard device + key char
                     _ioir = (uint)(0x04000000 | (_key << 16));
@@ -173,6 +176,8 @@ namespace Ridge.IO
                     break;
 
                 case 0x8:
+                    // TODO: i think the sense may be inverted from what the manual says
+                    // on these bits...
                     _status = data;
                     Console.WriteLine("status {0:x}", _status);
                     break;
@@ -205,12 +210,12 @@ namespace Ridge.IO
 
             }
 
-            if ((_status & 0x1) != 0)
+            if ((_status & 0x1) == 0)
             {
                 _interrupt = true;
 
-                // display device id + 1024x800 display + command completion.
-                _ioir = (uint)(0x000000003 | (_deviceId << 24));
+                // display device id + 768x1024 display + command completion.
+                _ioir = (uint)(0x000000001 | (_deviceId << 24));
             }
 
             //Console.WriteLine("command {0:x} reg {1:x} val {2:x}", command, register, data);
@@ -249,12 +254,12 @@ namespace Ridge.IO
             //
             // Interrupt, if enabled.
             //
-            if ((_status & 0x8) != 0)
+            if ((_status & 0x8) == 0)
             {
                 _interrupt = true;
 
-                // display device id + beam at top of screen, 1024x800 display.
-                _ioir = (uint)(0x00000000a | (_deviceId << 24));
+                // display device id + beam at top of screen, 768x1024 display.
+                _ioir = (uint)(0x000000008 | (_deviceId << 24));
             }
 
             _display.Render(_framebuffer);
@@ -295,7 +300,7 @@ namespace Ridge.IO
         private byte _deviceId;
 
         private int _hack;
-        private byte _key;
+        private uint _key;
 
         //
         // Device events

@@ -13,7 +13,7 @@ namespace Ridge
         {
             _scheduler = new Scheduler();
 
-            _mem = new PhysicalMemory(1024);
+            _mem = new PhysicalMemory(8192);
             _io = new IOBus();
             _cpu = new Processor(_mem, _io);
 
@@ -21,8 +21,8 @@ namespace Ridge
             _fdlp = new FDLP(0x1, this);
             _io.RegisterDevice(0x1, _fdlp);
 
-            _display = new Display(0x5, this);
-            _io.RegisterDevice(0x5, _display);
+            //_display = new Display(0x5, this);
+            //_io.RegisterDevice(0x5, _display);
         }
 
         public void Reset()
@@ -36,7 +36,7 @@ namespace Ridge
 
             _cpu.Execute();
             _fdlp.Clock();
-            _display.Clock();
+            //_display.Clock();
         }
 
         public Processor CPU

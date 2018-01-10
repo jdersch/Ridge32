@@ -47,6 +47,8 @@
     <Compile Include="CPU\Disassembler.cs" />
     <Compile Include="CPU\Instruction.cs" />
     <Compile Include="CPU\Processor.cs" />
+    <Compile Include="Debugger\Debugger.cs" />
+    <Compile Include="IO\Disk\FloppyDisk.cs" />
     <Compile Include="IO\Display.cs" />
     <Compile Include="IO\DisplayWindow.cs" />
     <Compile Include="IO\FDLP.cs" />
@@ -61,6 +63,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="Disks\SUS.img">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Content Include="Boot\bootblock.raw">
