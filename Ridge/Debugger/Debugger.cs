@@ -68,7 +68,7 @@ namespace Ridge.Debugger
 
                                 for (uint i = start; i < start + length; )
                                 {
-                                    i += Disassemble(i);
+                                  //  i += Disassemble(i);
                                 }
                             }
                             catch(Exception e)
@@ -112,12 +112,12 @@ namespace Ridge.Debugger
             Console.WriteLine("\nPC=0x{0:x8} Mode={1}", _system.CPU.PC, _system.CPU.Mode);
             if (_system.CPU.Mode == CPU.ProcessorMode.Kernel)
             {                
-                Disassemble(_system.CPU.PC);
+                Disassemble(_system.CPU.PC, _system.CPU.PC);
             }
             else
             {
                 bool pageFault = false;
-                uint realPC = _system.CPU.TranslateVirtualToReal(_system.CPU.SR[8], _system.CPU.PC, false, false, out pageFault);
+                uint realPC = _system.Memory.TranslateVirtualToReal(_system.CPU.SR[8], _system.CPU.PC, false, false, out pageFault);
 
                 if (pageFault)
                 {                    
@@ -125,13 +125,13 @@ namespace Ridge.Debugger
                 }
                 else
                 {                 
-                    Disassemble(realPC);
+                    Disassemble(realPC, _system.CPU.PC);
                 }
             }
 
         }
 
-        private uint Disassemble(uint addr)
+        private uint Disassemble(uint addr, uint vaddr)
         {
             CPU.Instruction inst = new CPU.Instruction(_system.Memory, addr);
            

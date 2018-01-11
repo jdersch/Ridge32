@@ -45,7 +45,7 @@ namespace Ridge.CPU
     /// </summary>
     public class Processor
     {
-        public Processor(IPhysicalMemory mem, IOBus io)
+        public Processor(Memory.MemoryController mem, IOBus io)
         {
             _mem = mem;
             _io = io;
@@ -120,7 +120,7 @@ namespace Ridge.CPU
                 // Yes, we have an external interrupt.
                 // Signal an event and do what needs to be done...
                 //
-                SignalEvent(EventType.ExternalInterrupt, 0);
+                SignalEvent(EventType.ExternalInterrupt);
 
                 //
                 // Set the external interrupt flag.  This is used by the ITEST
@@ -141,43 +141,19 @@ namespace Ridge.CPU
             //
 
             // Save PC pre-increment.
-            uint opc = _pc;            
-            Instruction i;
+            uint opc = _pc;
+            bool pageFault = false;
+            Instruction i = new Instruction(_mem, _pc, out pageFault);
 
-            if (_mode == ProcessorMode.Kernel)
+            if (pageFault)
             {
-                i = new Instruction(_mem, _pc);
-            }
-            else
-            {
-                //
-                // Get the translated physical address, take a page fault if necessary.
-                //
-                bool pageFault = false;
-                uint rPC = TranslateVirtualToReal(
-                    _sr[8],      // code segment, obvs.
-                    _pc,
-                    false,
-                    true,
-                    out pageFault);
-
-                if (pageFault)
-                {                    
-                    SignalEvent(EventType.PageFault, _pc);                    
-                    return;
-                }
-
-                //
-                // TODO:
-                // instructions straddling a page boundary may lie in different
-                // physical areas of memory, or may pagefault...
-                //
-                i = new Instruction(_mem, rPC);
+                SignalEvent(EventType.PageFault);
+                return;
             }
 
             _pc += i.Length;
-            
-            switch(i.Op)
+
+            switch (i.Op)
             {
                 case Opcode.MOVE:
                     _r[i.Rx] = _r[i.Ry];
@@ -303,7 +279,7 @@ namespace Ridge.CPU
                     }
                     break;
 
-                case Opcode.FIXT:
+                
                 case Opcode.FIXR:
                 case Opcode.RNEG:
                 case Opcode.RADD:
@@ -313,8 +289,7 @@ namespace Ridge.CPU
                 case Opcode.MAKERD:
                 case Opcode.FLOAT:
                 case Opcode.EADD:
-                case Opcode.ESUB:
-                case Opcode.EMPY:
+                case Opcode.ESUB:                
                 case Opcode.EDIV:
                 case Opcode.DFIXT:
                 case Opcode.DFIXR:
@@ -327,6 +302,11 @@ namespace Ridge.CPU
                 case Opcode.DFLOAT:
                 case Opcode.DRCOMP:
                     throw new NotImplementedException();
+
+                case Opcode.FIXT:
+                    float fVal = GetFloatFromWord(_r[i.Ry]);
+                    _r[i.Rx] = Convert.ToUInt32(fVal);
+                    break;
 
                 case Opcode.RCOMP:
                     {
@@ -348,16 +328,17 @@ namespace Ridge.CPU
                     }
                     break;
 
-                case Opcode.DCOMP:
-                    {
-                        ulong rx = GetRegisterPairValue(i.Rx);
-                        ulong ry = GetRegisterPairValue(i.Ry);
+                case Opcode.EMPY:
+                    SetRegisterPairValue(i.Rx, (ulong)_r[i.Rx] * (ulong)_r[i.Ry]);
+                    break;                
 
-                        if ((long)rx < (long)ry)
+                case Opcode.LCOMP:
+                    {                        
+                        if ((int)_r[i.Rx] < (int)_r[i.Ry])
                         {
                             _r[i.Rx] = 0xffffffff;
                         }
-                        else if ((long)rx == (long)ry)
+                        else if ((int)_r[i.Rx] == (int)_r[i.Ry])
                         {
                             _r[i.Rx] = 0;
                         }
@@ -368,13 +349,16 @@ namespace Ridge.CPU
                     }
                     break;
 
-                case Opcode.LCOMP:
-                    {                        
-                        if ((int)_r[i.Rx] < (int)_r[i.Ry])
+                case Opcode.DCOMP:
+                    {
+                        ulong rx = GetRegisterPairValue(i.Rx);
+                        ulong ry = GetRegisterPairValue(i.Ry);
+
+                        if ((long)rx < (long)ry)
                         {
                             _r[i.Rx] = 0xffffffff;
                         }
-                        else if ((int)_r[i.Rx] == (int)_r[i.Ry])
+                        else if ((long)rx == (long)ry)
                         {
                             _r[i.Rx] = 0;
                         }
@@ -417,7 +401,8 @@ namespace Ridge.CPU
 
                         do
                         {
-                            _mem.WriteWord(_sr[14] + (currentReg * 4), _r[currentReg++]);
+                            _mem.WriteWord(_sr[14] + (currentReg * 4), _r[currentReg]);
+                            currentReg++;
                         } while (currentReg <= i.Ry);
                     }
 
@@ -450,7 +435,8 @@ namespace Ridge.CPU
 
                         do
                         {
-                            _r[currentReg++] = _mem.ReadWord(_sr[14] + (currentReg * 4));
+                            _r[currentReg] = _mem.ReadWord(_sr[14] + (currentReg * 4));
+                            currentReg++;
                         } while (currentReg <= i.Ry);
 
                         //
@@ -479,7 +465,22 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.LDREGS:
-                    throw new NotImplementedException();
+                    if (_mode != ProcessorMode.Kernel)
+                    {
+                        Trap(TrapType.KernelViolation);
+                        break;
+                    }
+                    else
+                    {
+                        uint currentReg = (uint)i.Rx;
+
+                        do
+                        {
+                            _r[currentReg] = _mem.ReadWord(_sr[14] + (currentReg * 4));
+                            currentReg++;
+                        } while (currentReg <= i.Ry);
+                    }
+                    break;
 
                 case Opcode.TRANS:
                 case Opcode.DIRT:
@@ -489,8 +490,8 @@ namespace Ridge.CPU
                         break;
                     }
 
-                    bool pageFault = false;
-                    uint translatedAddress = TranslateVirtualToReal(
+                    pageFault = false;
+                    uint translatedAddress = _mem.TranslateVirtualToReal(
                         _r[i.Ry],
                         _r[(i.Ry + 1) & 0xf],
                         i.Op == Opcode.DIRT,      // modified for DIRT instruction
@@ -569,14 +570,14 @@ namespace Ridge.CPU
                             if (_externalInterrupt)
                             {
                                 _r[(i.Rx + 1) & 0xf] = _sr[0];
-                                _r[i.Rx] = 1;
+                                _r[i.Rx] = 0;
 
                                 // clear the interrupt flip flop.
                                 _externalInterrupt = false;
                             }
                             else
                             {
-                                _r[i.Rx] = 0;
+                                _r[i.Rx] = 1;
                             }
                             break;
 
@@ -684,7 +685,7 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.KCALL:
-                    throw new NotImplementedException();
+                    SignalEvent(EventType.KCALL, (uint)((i.Rx << 4) | i.Ry));
                     break;
 
                 case Opcode.TEST_lteqi:
@@ -1093,6 +1094,8 @@ namespace Ridge.CPU
                     // Should eventually Trap.  Throw at the moment while debugging.
                     throw new NotImplementedException(
                         String.Format("Unimplemented opcode {0}.", i.Op));
+                    // SignalEvent(EventType.IllegalInstruction, (uint)i.Op, _sr[8], _pc);
+                    break;
             }
         }
 
@@ -1103,25 +1106,15 @@ namespace Ridge.CPU
         private void ReadByte(int reg, uint address, SegmentType segment)
         {
             bool pageFault = false;
-
-            if (_mode != ProcessorMode.Kernel)
+            byte val = _mem.ReadByteV(address, segment, out pageFault);
+            
+            if (pageFault)
             {
-                address = TranslateVirtualToReal(
-                    segment == SegmentType.Code ? _sr[8] : _sr[9],
-                    address,
-                    false,      // not modified
-                    true,
-                    out pageFault);
-
-                if (pageFault)
-                {
-                    SignalEvent(EventType.PageFault, address);
-                }
+                SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
             }
-
-            if (!pageFault)
+            else
             {
-                _r[reg] = _mem.ReadByte(address);
+                _r[reg] = val;
             }
         }
 
@@ -1134,24 +1127,15 @@ namespace Ridge.CPU
             else
             {
                 bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
-                {
-                    address = TranslateVirtualToReal(
-                        segment == SegmentType.Code ? _sr[8] : _sr[9],
-                        address,
-                        false,      // not modified
-                        true,
-                        out pageFault);
+                ushort val = _mem.ReadHalfWordV(address, segment, out pageFault);
 
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
+                if (pageFault)
+                {
+                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
                 }
-
-                if (!pageFault)
+                else
                 {
-                    _r[reg] = _mem.ReadHalfWord(address);
+                    _r[reg] = val;
                 }
             }
         }
@@ -1165,24 +1149,15 @@ namespace Ridge.CPU
             else
             {
                 bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
-                {
-                    address = TranslateVirtualToReal(
-                        segment == SegmentType.Code ? _sr[8] : _sr[9],
-                        address,
-                        false,      // not modified
-                        true,
-                        out pageFault);
+                uint val = _mem.ReadWordV(address, segment, out pageFault);
 
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
+                if (pageFault)
+                {
+                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
                 }
-
-                if (!pageFault)
+                else
                 {
-                    _r[reg] = _mem.ReadWord(address);
+                    _r[reg] = val;
                 }
             }
         }
@@ -1196,49 +1171,24 @@ namespace Ridge.CPU
             else
             {
                 bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
-                {
-                    address = TranslateVirtualToReal(
-                        segment == SegmentType.Code ? _sr[8] : _sr[9],
-                        address,
-                        false,      // not modified
-                        true,
-                        out pageFault);
+                ulong val = _mem.ReadDoubleWordV(address, segment, out pageFault);
 
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
+                if (pageFault)
+                {
+                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
                 }
-
-                if (!pageFault)
+                else
                 {
-                    SetRegisterPairValue(rp, _mem.ReadDoubleWord(address));
+                    SetRegisterPairValue(rp, val);
                 }
             }
         }
 
         private void WriteByte(uint address, byte value)
-        {
-            bool pageFault = false;
-            if (_mode != ProcessorMode.Kernel)
+        {                        
+            if (_mem.WriteByteV(address, value))
             {
-                address = TranslateVirtualToReal(
-                    _sr[9],
-                    address,
-                    true,      
-                    true,
-                    out pageFault);
-
-                if (pageFault)
-                {
-                    SignalEvent(EventType.PageFault, address);
-                }
-            }
-
-            if (!pageFault)
-            {
-                _mem.WriteByte(address, value);
+                SignalEvent(EventType.PageFault, _sr[9], address);
             }
         }
 
@@ -1250,26 +1200,10 @@ namespace Ridge.CPU
             }
             else
             {
-                bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
+                if (_mem.WriteHalfWordV(address, value))
                 {
-                    address = TranslateVirtualToReal(
-                        _sr[9],
-                        address,
-                        true,
-                        true,
-                        out pageFault);
-
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
+                    SignalEvent(EventType.PageFault, _sr[9], address);
                 }
-
-                if (!pageFault)
-                {
-                    _mem.WriteHalfWord(address, value);
-                }                
             }
         }
 
@@ -1281,25 +1215,9 @@ namespace Ridge.CPU
             }
             else
             {
-                bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
+                if (_mem.WriteWordV(address, value))
                 {
-                    address = TranslateVirtualToReal(
-                        _sr[9],
-                        address,
-                        true,
-                        true,
-                        out pageFault);
-
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
-                }
-
-                if (!pageFault)
-                {
-                    _mem.WriteWord(address, value);
+                    SignalEvent(EventType.PageFault, _sr[9], address);
                 }
             }
         }
@@ -1312,26 +1230,10 @@ namespace Ridge.CPU
             }
             else
             {
-                bool pageFault = false;
-                if (_mode != ProcessorMode.Kernel)
+                if (_mem.WriteDoubleWordV(address, value))
                 {
-                    address = TranslateVirtualToReal(
-                        _sr[9],
-                        address,
-                        true,
-                        true,
-                        out pageFault);
-
-                    if (pageFault)
-                    {
-                        SignalEvent(EventType.PageFault, address);
-                    }
+                    SignalEvent(EventType.PageFault, _sr[9], address);
                 }
-
-                if (!pageFault)
-                {
-                    _mem.WriteDoubleWord(address, value);
-                }                
             }
         }
 
@@ -1349,13 +1251,49 @@ namespace Ridge.CPU
             _r[(rp + 1) & 0xf] = (uint)value;
         }
 
-        private void SignalEvent(EventType e, uint data)
+        private void SignalEvent(EventType e)
+        {
+            SignalEvent(e, 0, 0, 0);
+        }
+
+        private void SignalEvent(EventType e, uint d0)
+        {
+            SignalEvent(e, d0, 0, 0);
+        }
+
+        private void SignalEvent(EventType e, uint d0, uint d1)
+        {
+            SignalEvent(e, d0, d1, 0);
+        }
+
+        private void SignalEvent(EventType e, uint d0, uint d1, uint d2)
         {
             //
             // Do event-specific things, like setting SR0-SR3.
             //
             switch (e)
             {
+                case EventType.KCALL:
+                    _sr[15] = _pc;
+                    e = (EventType)(d0 * 4);       // calculate CCB address
+                    break;
+
+                case EventType.IllegalInstruction:
+                    if (_mode == ProcessorMode.Kernel)
+                    {
+                        _sr[0] = _pc;
+                    }
+                    else
+                    {
+                        _sr[0] = 1;
+                        _sr[15] = _pc;
+                    }
+
+                    _sr[1] = d0;    // opcode
+                    _sr[2] = d1;    // segment
+                    _sr[3] = d2;    // virtual address
+                    break;
+
                 case EventType.ExternalInterrupt:
                     _sr[0] = _intDevice.AckInterrupt();
                     _sr[15] = _pc;
@@ -1371,9 +1309,8 @@ namespace Ridge.CPU
 
                 case EventType.PageFault:
                     _sr[0] = 1;
-                    _sr[1] = 0xffffffff;
-                    _sr[2] = _sr[8];
-                    _sr[3] = data;
+                    _sr[2] = d0;
+                    _sr[3] = d1;
                     _sr[15] = _pc;
                     break;
 
@@ -1404,124 +1341,7 @@ namespace Ridge.CPU
             }
         }
 
-        public uint TranslateVirtualToReal(uint segmentNumber, uint virtualAddress, bool modified, bool referenced, out bool pageFault)
-        {
-            uint translatedAddress = virtualAddress;            
-            
-            //
-            // Search the VRT to find the translation entry.
-            //
-            // From the Ridge Processor Reference, 20 jan 1983:
-            // "When the processor needs to search the VRT, it proceeds as follows...
-            //  1. The segment number of the code [SR8] or data [SR9] segment to be
-            //     referenced is added to bits 0...19 of the virtual address.
-            //  2. This sum is logically ANDed with the contents of VRMASK
-            //     which is kept in special register SR13.
-            //  3. The result is shifted left 3 bits and added to the VRT
-            //     table base address which is stored in SR12.
-            //  4. The VRT entry is fetched and the tag and segment number
-            //     parts are compared with virtual address and segment number
-            //     desired.
-            //  5. If they match, the real page number, virtual address, 
-            //     and modify bits are loaded into the TMT and the
-            //     referenced bit is set.
-            //  6. If not, the link pointer is followed (added to SR12) to
-            //     the next VRT entry.  If a link pointer of zero is found
-            //     the end of the chain has been reached and a page fault
-            //     interrupt is generated."
-            //
-            // Whew.  A 32-bit virtual address looks like:
-            //
-            //  0            19 20            31
-            //  | Virt. Page # | Byte in Page |
-            //
-            // Yielding a 20 bite page # and 12-bit offsets in said page.
-            //
-            pageFault = false;
-
-            // add SR8/SR9 to bits 0..19 of the virtual address
-            uint vrtAddress = (virtualAddress >> 12) + segmentNumber;
-
-            // AND with contents of VRMASK (SR13)
-            vrtAddress &= _sr[13];
-
-            // Shift left 3 bits, add to VRT table base address in SR12
-            vrtAddress = (vrtAddress << 3) + _sr[12];
-
-            // Grab the VRT entry from the computed address.
-            UInt32 vrtEntry0 = _mem.ReadWord(vrtAddress);
-            UInt32 vrtEntry1 = _mem.ReadWord(vrtAddress + 4);
-
-            // 
-            // The first word of the VRT table entry looks like:
-            // 0         15 16            31
-            // |  Seg #    |     Tag      |
-            //
-            // Where the Seg # is the actual segment number (as in SR8 or SR9) and Tag
-            // is the high order bits (0..15) of the virtual address.
-            //
-            // Follow the chain until we find a match or hit the end...
-            while (true)
-            {
-                if (segmentNumber == (vrtEntry0 >> 16) &&
-                    (virtualAddress >> 16) == (vrtEntry0 & 0xffff))
-                {
-                    //
-                    // We have a match!  Check the validity bits.
-                    // If 0, this is invalid and we take a page-fault
-                    //
-                    if ((vrtEntry1 & 0xf800) == 0)
-                    {
-                        pageFault = true;
-                        break;
-                    }
-                    else
-                    {
-                        // Build an address from the page number in the VRT
-                        // and the offset in the virtual address
-                        //
-                        translatedAddress = ((vrtEntry1 & 0x7ff) << 12) | (virtualAddress & 0xfff);
-
-                        // Set the modified/referenced bits as appropriate.
-                        if (modified)
-                        {
-                            vrtEntry1 |= 0x800;
-                        }
-
-                        if (referenced)
-                        {
-                            vrtEntry1 |= 0x8000;
-                        }
-
-                        _mem.WriteWord(vrtAddress + 4, vrtEntry1);
-
-                        break;
-                    }
-                }
-                else
-                {
-                    //
-                    // This VRT entry doesn't match.  Follow the link and try again.
-                    // If this is the last link, take a page-fault.
-                    //
-                    uint link = vrtEntry1 >> 16;
-
-                    if (link == 0)
-                    {
-                        pageFault = true;
-                        break;
-                    }
-                    else
-                    {
-                        vrtAddress = link + _sr[12];
-                        vrtEntry0 = _mem.ReadWord(vrtAddress);
-                        vrtEntry1 = _mem.ReadWord(vrtAddress + 4);
-                    }
-                }
-            }            
-
-            return translatedAddress;
-        }
+        
 
         private void Trap(TrapType t)
         {
@@ -1565,7 +1385,7 @@ namespace Ridge.CPU
 
         private uint _pc;
 
-        private IPhysicalMemory _mem;
+        private Memory.MemoryController  _mem;
         private IOBus           _io;    
         
         //
@@ -1582,15 +1402,6 @@ namespace Ridge.CPU
         //
         // Scratchpad for floating point conversion operations.
         //
-        private byte[]          _float = new byte[8];
-
-        //
-        // VRT information
-        //
-        private enum SegmentType
-        {            
-            Code,           // Use the code segment (in SR8)
-            Data            // Use the data segment (in SR9)
-        }
+        private byte[]          _float = new byte[8];        
     }
 }

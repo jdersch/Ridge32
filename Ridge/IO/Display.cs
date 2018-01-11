@@ -81,14 +81,14 @@ namespace Ridge.IO
             {
                 _hack = 250;
 
-                if (_display.KeyAvailable)
-                //if ((_status == 0xc)
+                if (_display.KeyAvailable &&
+                   (_status & 0x10) == 0)
                 {
-                    _key = _display.GetKey();                    
+                    _key = _display.GetKey();  
 
                     // keyboard device + key char
-                    _ioir = (uint)(0x04000000 | (_key << 16));
-                    _interrupt = true;                    
+                    _ioir = (((uint)_deviceId & 0xfe) << 24) | (_key << 16);
+                    _interrupt = true;
                 }
             }
 

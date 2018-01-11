@@ -13,9 +13,10 @@ namespace Ridge
         {
             _scheduler = new Scheduler();
 
-            _mem = new PhysicalMemory(8192);
+            _mem = new Memory.MemoryController(8192);            
             _io = new IOBus();
             _cpu = new Processor(_mem, _io);
+            _mem.AttachCPU(_cpu);
 
             // Attach IO devices
             _fdlp = new FDLP(0x1, this);
@@ -49,7 +50,7 @@ namespace Ridge
             get { return _io; }
         }
 
-        public IPhysicalMemory Memory
+        public MemoryController Memory
         {
             get { return _mem; }
         }
@@ -61,7 +62,7 @@ namespace Ridge
 
         private Processor _cpu;
         private IOBus _io;
-        private IPhysicalMemory _mem;
+        private Memory.MemoryController _mem;        
 
         // IO devices
         private FDLP _fdlp;

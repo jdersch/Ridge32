@@ -261,7 +261,51 @@ namespace Ridge.CPU
                 }
                 else
                 {
-                    Displacement = (int)((short)mem.ReadHalfWord(address + 2));
+                    Displacement = (short)mem.ReadHalfWord(address + 2);
+                    Length = 4;
+                }
+
+                // Compute the displacement address (PC + Displacement) for branches.
+                // The LSB is used for branch prediction logic
+                BranchAddress = (uint)((address + Displacement) & 0xfffffffe);
+            }
+            else
+            {
+                Length = 2;
+            }
+        }
+
+        /// <summary>
+        /// Decodes the instruction in physical memory at the given address.
+        /// </summary>
+        /// <param name="mem"></param>
+        /// <param name="address"></param>
+        public Instruction(IVirtualMemory vMem, uint address, out bool pageFault)
+        {
+            //
+            // Read the first halfword of the instruction in, determine its type and see if we need go further.
+            //
+            ushort hword = vMem.ReadHalfWordV(address, SegmentType.Code, out pageFault);
+
+            Op = (Opcode)(hword >> 8);
+
+            Rx = (hword & 0xf0) >> 4;
+            Ry = hword & 0xf;
+
+            if ((hword & 0x8000) != 0)
+            {
+                //
+                // This is a memory reference instruction.
+                // Is this a short or long displacement instruction?
+                //
+                if ((hword & 0x1000) != 0)
+                {
+                    Displacement = (int)vMem.ReadWordV(address + 2, SegmentType.Code, out pageFault);
+                    Length = 6;
+                }
+                else
+                {
+                    Displacement = (short)vMem.ReadHalfWordV(address + 2, SegmentType.Code, out pageFault);
                     Length = 4;
                 }
 

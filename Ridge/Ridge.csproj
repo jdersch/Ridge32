@@ -55,7 +55,8 @@
     <Compile Include="IO\IIODevice.cs" />
     <Compile Include="IO\IOBus.cs" />
     <Compile Include="Memory\IPhysicalMemory.cs" />
-    <Compile Include="Memory\PhysicalMemory.cs" />
+    <Compile Include="Memory\IVirtualMemory.cs" />
+    <Compile Include="Memory\MemoryController.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Scheduler.cs" />

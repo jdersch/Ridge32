@@ -76,10 +76,9 @@ namespace Ridge.IO
                 if (Console.KeyAvailable)
                 {
                     ConsoleKeyInfo k = Console.ReadKey(true);
-                    _ioir = (uint)(0x01880000 | (k.KeyChar << 8));
-                    _interrupt = true;
 
-                    _lastUnit = 0;
+                    // This is always unit 0 for now...
+                    PostInterrupt(0x00880000 | (uint)(k.KeyChar << 8), 0);
                 }
             }
         }
@@ -92,8 +91,7 @@ namespace Ridge.IO
             //  0         7 8         15       30    31
             //  | device # | last unit |      | H/S | |
             //
-            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));            
-
+            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));
             return 0;
         }
 
@@ -127,6 +125,10 @@ namespace Ridge.IO
             {                
                 switch(command)
                 {
+                    case 0x80:
+                        ret = StartPortWrite(0);
+                        break;
+
                     case 0x86:  // Start I/O to left floppy
                         ret = StartFloppy(0);
                         break;
@@ -143,12 +145,64 @@ namespace Ridge.IO
             return ret;
         }
 
+        private uint StartPortWrite(uint port)
+        {
+            uint ret = 0;
+
+            //
+            // Read the port write DCB -- this starts at offset port * 0x20.
+            //
+            uint dcbOffset = _dcbAddress + 0x20 * (uint)port;
+
+            byte gOrder = _mem.ReadByte(dcbOffset);
+            byte sOrder = _mem.ReadByte(dcbOffset + 1);
+            uint ridgeAddress = _mem.ReadWord(dcbOffset + 5) >> 8;
+            ushort byteCount = (ushort)(_mem.ReadByte(dcbOffset + 8));
+
+            Console.WriteLine("port {0} gOrder {1:x} sOrder {2:x} ridgeAddress {3:x8} byteCount {4:x4}",
+                port, gOrder, sOrder, ridgeAddress, byteCount);
+
+            switch(gOrder)
+            {
+                case 0: // undocumented...
+                case 1: // block write
+                    DoBlockPortWrite(ridgeAddress, byteCount, port);
+                    break;
+
+                case 3: // single character write
+                    Console.Write((char)sOrder);
+                    PostInterrupt(0x00800000, port);
+                    break;
+
+                default:
+                    throw new NotImplementedException(
+                        String.Format("Unimplemented port gOrder {0}", gOrder));
+            }
+
+            return ret;
+        }
+
+        private void DoBlockPortWrite(uint ridgeAddress, uint byteCount, uint port)
+        {
+            for(uint i=0;i<byteCount;i++)
+            {
+                byte b = _mem.ReadByte(ridgeAddress + i);
+                Console.Write((char)b);
+            }
+
+            uint dcbOffset = _dcbAddress + 0x20 * (uint)port;
+            //_mem.WriteHalfWord(dcbOffset + 0xa, (ushort)byteCount);
+
+            PostInterrupt(0x00800000, 0);
+
+        }
+
         private uint StartFloppy(int drive)
         {
             uint ret = 0;
 
             //
-            // Read the floppy disc DCB -- this starts at offset 0x0c.
+            // Read the floppy disc DCB -- this starts at offset 0xc0.
             //
             uint dcbOffset = _dcbAddress + 0xc0;
             byte gOrder = _mem.ReadByte(dcbOffset);
@@ -162,10 +216,10 @@ namespace Ridge.IO
             byte cylinder = _mem.ReadByte(dcbOffset + 0xe);
             byte sector = _mem.ReadByte(dcbOffset + 0xf);
 
-            Console.WriteLine("gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
+            Console.WriteLine("floppy gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
                 gOrder, sOrder, ridgeAddress, byteCount, necOrder);
 
-            Console.WriteLine("head/Unit {0:x} cyl {1:x} sector {2:x}", headUnit, cylinder, sector);
+            Console.WriteLine("       head/Unit {0:x} cyl {1:x} sector {2:x}", headUnit, cylinder, sector);
 
             switch(sOrder)
             {
@@ -217,17 +271,7 @@ namespace Ridge.IO
                 }
             }
 
-            // Schedule completion interrupt.
-            //_floppyActionEvent.TimestampNsec = _floppyActionTimeNsec;
-            //_sys.Scheduler.Schedule(_floppyActionEvent);
-            //_handshake = 0;
-            //_lastUnit = 0;
-
-            Console.WriteLine(_interrupt);
-            _ioir = 0x01860000;
-            _interrupt = true;
-            _lastUnit = 6;
-
+            PostInterrupt(0x00800000, 6);
         }
 
         private void CharacterOutCallback(ulong timeNsec, ulong skewNsec, object context)
@@ -238,17 +282,21 @@ namespace Ridge.IO
 
         private void FloppyActionCallback(ulong timeNsec, ulong skewNsec, object context)
         {
-            _ioir = 0x01860000;
-            _interrupt = true;
+            PostInterrupt(0x00800000, 6);
+        }
 
-            _lastUnit = 0;
+        private void PostInterrupt(uint ioir, uint unit)
+        {
+            _ioir = (uint)(ioir | ((uint)_deviceId << 24) | ((unit & 0xf) << 16));
+            _lastUnit = unit;
+            _interrupt = true;
         }
 
         private bool _interrupt;
         private uint _ioir;
 
-        private int _lastUnit;
-        private int _handshake;
+        private uint _lastUnit;
+        private uint _handshake;
 
         private int _hack = 1000;
 

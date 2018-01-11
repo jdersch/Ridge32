@@ -60,7 +60,7 @@ namespace Ridge
 
                 if (system.CPU.PC == 0x0)
                 {
-                    _execState = ExecutionState.Step;
+                   //_execState = ExecutionState.Step;
                 }
             }            
         }
