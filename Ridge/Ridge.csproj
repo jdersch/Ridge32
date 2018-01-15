@@ -67,6 +67,9 @@
     <None Include="Disks\SUS.img">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="Notes\PROMs\FDLP-003-2974-7N.BIN" />
+    <None Include="Notes\PROMs\FDLP-003-2980-7M.BIN" />
+    <None Include="Notes\PROMs\FDLP-003-2996-7R.BIN" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Boot\bootblock.raw">
