@@ -71,15 +71,19 @@ namespace Ridge.IO
             // Real dirty hack for RBUG console input for now
             if (_hack == 0)
             {
-                _hack = 1000;
+                _handshake = 0;
 
-                if (Console.KeyAvailable)
+                _hack = 256;
+
+                if (_rbugReadChar && Console.KeyAvailable)
                 {
                     ConsoleKeyInfo k = Console.ReadKey(true);
 
                     // This is always unit 0 for now...
                     PostInterrupt(0x00880000 | (uint)(k.KeyChar << 8), 0);
-                }
+
+                    _rbugReadChar = false;
+                }                
             }
         }
 
@@ -91,8 +95,8 @@ namespace Ridge.IO
             //  0         7 8         15       30    31
             //  | device # | last unit |      | H/S | |
             //
-            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));
-            return 0;
+            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));            
+            return _handshake;
         }
 
         public uint Write(uint addressWord, uint data)
@@ -106,18 +110,15 @@ namespace Ridge.IO
             //            
             uint command = (data >> 24);
 
-            uint ret = 0;
+            Console.WriteLine("addr {0:x8} data {1:x8}", addressWord, data);            
+
+            uint ret = 1;
             // 00-7F: write one character on port 0 - handshake is by bit 30
             //        (special order only used by RBUG).
             if (command < 0x80)
             {
                 //Console.WriteLine("{0} - {1}", command, (char)command);
                 Console.Write((char)command);
-                _handshake = 1;
-
-                // Schedule handshake event
-                _characterOutEvent.TimestampNsec = _characterOutTimeNsec;
-                _sys.Scheduler.Schedule(_characterOutEvent);
 
                 ret = 0;    // This should always succeed.
             }
@@ -133,7 +134,14 @@ namespace Ridge.IO
                         ret = StartFloppy(0);
                         break;
 
-                    case 0xff:  // Undocumented...
+                    case 0xff: 
+                        //
+                        // This command is undocumented, but it appears to be sent when RBUG (and other
+                        // code that uses primitive port I/O) wants to read a single character
+                        // from Port 0... IOIR is then set and the interrupt flag is raised...
+                        // This despite command C2 apparently being defined to do just this.
+                        //
+                        _rbugReadChar = true;
                         break;
 
                     default:
@@ -141,6 +149,12 @@ namespace Ridge.IO
                         break;
                 }
             }
+
+            _handshake = 1;
+
+            // Schedule handshake event
+            //_characterOutEvent.TimestampNsec = _characterOutTimeNsec;
+            //_sys.Scheduler.Schedule(_characterOutEvent);
 
             return ret;
         }
@@ -156,15 +170,18 @@ namespace Ridge.IO
 
             byte gOrder = _mem.ReadByte(dcbOffset);
             byte sOrder = _mem.ReadByte(dcbOffset + 1);
+            byte gStat = _mem.ReadByte(dcbOffset + 2);
+            byte sStat = _mem.ReadByte(dcbOffset + 3);
+            byte retries = _mem.ReadByte(dcbOffset + 4);
             uint ridgeAddress = _mem.ReadWord(dcbOffset + 5) >> 8;
-            ushort byteCount = (ushort)(_mem.ReadByte(dcbOffset + 8));
+            ushort byteCount = (ushort)(_mem.ReadHalfWord(dcbOffset + 8));
 
-            Console.WriteLine("port {0} gOrder {1:x} sOrder {2:x} ridgeAddress {3:x8} byteCount {4:x4}",
-                port, gOrder, sOrder, ridgeAddress, byteCount);
+            Console.WriteLine("port {0} gOrder {1:x} sOrder {2:x} gStat {3:x} sStat {4:x} retries {5:x} ridgeAddress {6:x8} byteCount {7:x4}",
+                port, gOrder, sOrder, gStat, sStat, retries, ridgeAddress, byteCount);
 
             switch(gOrder)
             {
-                case 0: // undocumented...
+                case 0: // undocumented...                    
                 case 1: // block write
                     DoBlockPortWrite(ridgeAddress, byteCount, port);
                     break;
@@ -191,10 +208,9 @@ namespace Ridge.IO
             }
 
             uint dcbOffset = _dcbAddress + 0x20 * (uint)port;
-            //_mem.WriteHalfWord(dcbOffset + 0xa, (ushort)byteCount);
+            _mem.WriteHalfWord(dcbOffset + 0xa, (ushort)byteCount);
 
             PostInterrupt(0x00800000, 0);
-
         }
 
         private uint StartFloppy(int drive)
@@ -297,8 +313,11 @@ namespace Ridge.IO
 
         private uint _lastUnit;
         private uint _handshake;
+        private bool _rbugReadChar;
 
         private int _hack = 1000;
+        private bool _hackInterrupt;
+        private uint _hackValue = 0;
 
         private RidgeSystem _sys;
         private IPhysicalMemory _mem;        

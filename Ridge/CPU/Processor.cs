@@ -114,7 +114,7 @@ namespace Ridge.CPU
             // Check for pending external interrupts.
             _intDevice = _io.InterruptRequested();
 
-            if (_intDevice != null)
+            if (_intDevice != null && !_externalInterrupt)
             {
                 //
                 // Yes, we have an external interrupt.
@@ -130,7 +130,12 @@ namespace Ridge.CPU
                 // unclear.
                 //
                 _externalInterrupt = true;
-            }            
+            }
+
+            //
+            // Update timers and check for overflow
+            //
+            UpdateTimers();
 
             //
             // Decode the current instruction.
@@ -569,7 +574,7 @@ namespace Ridge.CPU
                         case MaintOpcode.ITEST:
                             if (_externalInterrupt)
                             {
-                                _r[(i.Rx + 1) & 0xf] = _sr[0];
+                                _r[(i.Rx + 1) & 0xf] = _intDevice.AckInterrupt();
                                 _r[i.Rx] = 0;
 
                                 // clear the interrupt flip flop.
@@ -685,7 +690,14 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.KCALL:
-                    SignalEvent(EventType.KCALL, (uint)((i.Rx << 4) | i.Ry));
+                    if (_mode != ProcessorMode.User)
+                    {
+                        SignalEvent(EventType.KernelViolation, (uint)i.Op, (uint)i.Rx, (uint)i.Ry);
+                    }
+                    else
+                    {
+                        SignalEvent(EventType.KCALL, (uint)((i.Rx << 4) | i.Ry));
+                    }
                     break;
 
                 case Opcode.TEST_lteqi:
@@ -1271,11 +1283,12 @@ namespace Ridge.CPU
             //
             // Do event-specific things, like setting SR0-SR3.
             //
+            bool doVector = true;
             switch (e)
             {
                 case EventType.KCALL:
                     _sr[15] = _pc;
-                    e = (EventType)(d0 * 4);       // calculate CCB address
+                    e = (EventType)(d0 * 4);       // calculate CCB address                    
                     break;
 
                 case EventType.IllegalInstruction:
@@ -1291,12 +1304,23 @@ namespace Ridge.CPU
 
                     _sr[1] = d0;    // opcode
                     _sr[2] = d1;    // segment
-                    _sr[3] = d2;    // virtual address
+                    _sr[3] = d2;    // virtual address                    
                     break;
 
                 case EventType.ExternalInterrupt:
-                    _sr[0] = _intDevice.AckInterrupt();
-                    _sr[15] = _pc;
+                    //
+                    // External interrupts only take effect
+                    // in User mode.  Kernel mode has to poll using ITEST.
+                    if (_mode == ProcessorMode.User)
+                    {
+                        _sr[0] = _intDevice.AckInterrupt();
+                        _sr[15] = _pc;
+                    }                   
+                    else
+                    {
+                        // No External Interrupts in Kernel mode.
+                        doVector = false;
+                    }
                     break;
 
                 case EventType.Switch0Interrupt:
@@ -1314,6 +1338,37 @@ namespace Ridge.CPU
                     _sr[15] = _pc;
                     break;
 
+                case EventType.KernelViolation:
+                    if (_mode == ProcessorMode.Kernel)
+                    {
+                        _sr[0] = _pc;
+                    }
+                    else
+                    {
+                        _sr[0] = 1;
+                        _sr[15] = _pc;
+                    }
+
+                    _sr[1] = d0;
+                    _sr[2] = d1;
+                    _sr[3] = d2;
+                    break;
+
+                case EventType.Timer1Interrupt:
+                case EventType.Timer2Interrupt:
+                    // Only takes effect in user mode
+                    if (_mode == ProcessorMode.User)
+                    {
+                        _sr[0] = 1;
+                        _sr[15] = _pc;
+                    }
+                    else
+                    {
+                        // No timer interrupts in Kernel mode.
+                        doVector = false;
+                    }
+                    break;
+
                 default:
                     throw new NotImplementedException(
                         String.Format("Unimplemented signal {0}", e));
@@ -1323,15 +1378,14 @@ namespace Ridge.CPU
             // Grab the vector for the event from the CCB.
             // TODO: the documentation is *extremely vague*
             // but it appears that external interrupts are not vectored from the CCB
-            // while in Kernel mode, only in User mode.  
+            // while in Kernel mode, only in User mode (which makes sense).
             // It does appear that SR registers are still modified as appropriate.
             //
-            // Ayway, we were going to grab the vector for the event
+            // Anyway, we were going to grab the vector for the event
             // from the CCB, the offset of which is specified by
             // SR11.
             //            
-            if (e != EventType.ExternalInterrupt ||
-                _mode == ProcessorMode.User)
+            if (doVector)
             {
                 uint vectorAddress = _mem.ReadWord(_sr[11] + (uint)e);
 
@@ -1341,7 +1395,40 @@ namespace Ridge.CPU
             }
         }
 
-        
+        private void UpdateTimers()
+        {
+            _timerTicks++;
+
+            if (_timerTicks > _ticksPerMillisecond)
+            {
+                _timerTicks = 0;
+
+                uint timer1 = _mem.ReadWord(_sr[11] + 0x440);
+                _mem.WriteWord(_sr[11] + 0x440, timer1-1);
+
+                uint timer2 = _mem.ReadWord(_sr[11] + 0x444);
+                _mem.WriteWord(_sr[11] + 0x444, timer2-1);
+
+                if ((int)timer1 < 0)
+                {
+                    //Console.WriteLine("timer 1");
+                    SignalEvent(EventType.Timer1Interrupt);
+                }
+                else if ((int)timer2 < 0)
+                {
+                    //Console.WriteLine("timer 2");
+                    SignalEvent(EventType.Timer2Interrupt);
+                }
+
+                if (_mode == ProcessorMode.User &&
+                    _sr[14] != 1)
+                {
+                    // Update the process clock (PCB offset 0x50)
+                    uint processTimer = _mem.ReadWord(_sr[14] + 0x50);
+                    _mem.WriteWord(_sr[14] + 0x50, processTimer + 1);
+                }
+            }
+        }
 
         private void Trap(TrapType t)
         {
@@ -1398,6 +1485,12 @@ namespace Ridge.CPU
         // ITEST MAINT instruction.
         //
         private bool            _externalInterrupt;
+
+        //
+        // Timer timing
+        //
+        private uint _timerTicks;
+        private const uint _ticksPerMillisecond = 8333;       // fudged, based on minimum cycle time of 120ns
 
         //
         // Scratchpad for floating point conversion operations.

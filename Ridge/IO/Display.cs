@@ -55,9 +55,7 @@ namespace Ridge.IO
             // 128kb of framebuffer.
             _framebuffer = new uint[32768];           
 
-            _display = new DisplayWindow();
-
-            _hack = 1000000;
+            _display = new DisplayWindow();            
 
             _frameEvent = new Event(_frameTimeNsec, null, FrameCompleteCallback);
             _sys.Scheduler.Schedule(_frameEvent);
@@ -140,7 +138,7 @@ namespace Ridge.IO
 
             Console.WriteLine("reg {0:x}", register);
 
-            return 0;
+            return 1;
         }
 
         public uint Write(uint addressWord, uint data)
@@ -186,9 +184,9 @@ namespace Ridge.IO
                     throw new NotImplementedException(
                         String.Format("Unhandled display register {0}.", register));
             }
-
-            switch(command)
-            {
+            
+            switch (command)
+            {                
                 case 0x0:
                 case 0x10:
                     break;
@@ -214,11 +212,11 @@ namespace Ridge.IO
             {
                 _interrupt = true;
 
-                // display device id + 768x1024 display + command completion.
-                _ioir = (uint)(0x000000001 | (_deviceId << 24));
-            }
+                // display device id + 1024x800 display + command completion.
+                _ioir = (uint)(0x000000003 | (_deviceId << 24));
+            }            
 
-            //Console.WriteLine("command {0:x} reg {1:x} val {2:x}", command, register, data);
+            // Console.WriteLine("command {0:x} reg {1:x} val {2:x} hack {3}", command, register, data, _hackCount);
 
             return 0;
         }
@@ -258,8 +256,8 @@ namespace Ridge.IO
             {
                 _interrupt = true;
 
-                // display device id + beam at top of screen, 768x1024 display.
-                _ioir = (uint)(0x000000008 | (_deviceId << 24));
+                // display device id + beam at top of screen, 1024x800 display.
+                _ioir = (uint)(0x00000000a | (_deviceId << 24));
             }
 
             _display.Render(_framebuffer);

@@ -68,10 +68,36 @@ namespace Ridge.Debugger
 
                                 for (uint i = start; i < start + length; )
                                 {
-                                  //  i += Disassemble(i);
+                                    i += Disassemble(i);
                                 }
                             }
                             catch(Exception e)
+                            {
+                                Console.WriteLine("invalid args.");
+                            }
+                        }
+
+                        next = ExecutionState.Debug;
+                        break;
+
+                    case "m":
+                        if (tokens.Length < 2)
+                        {
+                            Console.WriteLine("m <addr> [length]");
+                        }
+                        else
+                        {
+                            try
+                            {
+                                uint start = uint.Parse(tokens[1], System.Globalization.NumberStyles.HexNumber);
+                                uint length = tokens.Length > 2 ? uint.Parse(tokens[2], System.Globalization.NumberStyles.HexNumber) : 1;
+
+                                for (uint i = start; i < start + length; i+=4)
+                                {
+                                    Console.WriteLine("{0:x8}: {1:x8}", i, _system.Memory.ReadWord(i));
+                                }
+                            }
+                            catch (Exception e)
                             {
                                 Console.WriteLine("invalid args.");
                             }
@@ -110,32 +136,20 @@ namespace Ridge.Debugger
             }
 
             Console.WriteLine("\nPC=0x{0:x8} Mode={1}", _system.CPU.PC, _system.CPU.Mode);
-            if (_system.CPU.Mode == CPU.ProcessorMode.Kernel)
-            {                
-                Disassemble(_system.CPU.PC, _system.CPU.PC);
-            }
-            else
-            {
-                bool pageFault = false;
-                uint realPC = _system.Memory.TranslateVirtualToReal(_system.CPU.SR[8], _system.CPU.PC, false, false, out pageFault);
-
-                if (pageFault)
-                {                    
-                    Console.WriteLine("<pagefault>");
-                }
-                else
-                {                 
-                    Disassemble(realPC, _system.CPU.PC);
-                }
-            }
-
+            
+            Disassemble(_system.CPU.PC);
         }
 
-        private uint Disassemble(uint addr, uint vaddr)
+        private uint Disassemble(uint addr)
         {
-            CPU.Instruction inst = new CPU.Instruction(_system.Memory, addr);
+            bool pageFault = false;
+            CPU.Instruction inst = new CPU.Instruction(_system.Memory, addr, out pageFault);
            
-            if (inst.Length == 2)
+            if (pageFault)
+            {
+                Console.WriteLine("<page fault>");
+            }
+            else if (inst.Length == 2)
             {
                 Console.WriteLine("0x{0:x8}: 0x{1:x4}              {2}", addr, _system.Memory.ReadHalfWord(addr), Ridge.CPU.Disassembler.Disassemble(inst));
             }

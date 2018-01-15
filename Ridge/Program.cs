@@ -9,6 +9,8 @@ namespace Ridge
     {
         static void Main(string[] args)
         {
+            Hackeroo = false;
+
             RidgeSystem system = new RidgeSystem();
             system.Reset();
 
@@ -58,9 +60,10 @@ namespace Ridge
 
                 }
 
-                if (system.CPU.PC == 0x0)
+                if (Hackeroo)
                 {
                    //_execState = ExecutionState.Step;
+                   Hackeroo = false;
                 }
             }            
         }
@@ -74,6 +77,8 @@ namespace Ridge
 
             e.Cancel = true;            
         }
+
+        public static bool Hackeroo;
 
         private static ExecutionState _execState;
     }

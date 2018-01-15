@@ -33,8 +33,8 @@ namespace Ridge.Memory
                 return _mem[address];
             }
             else
-            {
-                return 0xff;
+            {        
+                return 0x00;
             }
         }        
 
@@ -79,8 +79,7 @@ namespace Ridge.Memory
         }
 
         public void WriteDoubleWord(uint address, ulong d)
-        {
-            WriteWord(address, (uint)(d >> 32));
+        {            WriteWord(address, (uint)(d >> 32));
             WriteWord(address + 4, (uint)d);
         }
 

@@ -19,7 +19,7 @@ namespace Ridge.IO
         {
             _lock = new ReaderWriterLockSlim();
 
-            _displayData = new byte[128 * 1024];
+            _displayData = new byte[1024 * 128];
 
             InvokeDisplayThread();
         }
@@ -76,7 +76,7 @@ namespace Ridge.IO
             _display.BackColor = Color.Black;
             _display.Text = "Ridge32";
             _display.ControlBox = false;
-            _display.ClientSize = new Size(768, 1024);
+            _display.ClientSize = new Size(1024, 800);
             _display.SizeGripStyle = SizeGripStyle.Hide;
             _display.WindowState = FormWindowState.Normal;
             _display.KeyPreview = true;
@@ -86,11 +86,11 @@ namespace Ridge.IO
             //_display.MouseWheel += new MouseEventHandler(OnMouseWheel);
 
 
-            _buffer = new Bitmap(768, 1024, PixelFormat.Format1bppIndexed);
+            _buffer = new Bitmap(1024, 800, PixelFormat.Format1bppIndexed);
 
             _dispBox = new PictureBox();
             _dispBox.Image = _buffer;
-            _dispBox.Size = new Size(768, 1024);
+            _dispBox.Size = new Size(1024, 800);
             _dispBox.Cursor = Cursors.Cross;
             _dispBox.Paint += new PaintEventHandler(OnPaint);
             _dispBox.Enabled = false;
@@ -101,7 +101,7 @@ namespace Ridge.IO
 
             _display.Controls.Add(_dispBox);
 
-            _displayRect = new Rectangle(0, 0, 768, 1024);
+            _displayRect = new Rectangle(0, 0, 1024, 800);
 
             _initEvent.Set();
 
@@ -117,7 +117,7 @@ namespace Ridge.IO
         void OnKeyUp(object sender, KeyEventArgs e)
         {
             _keyAvailable = true;
-            _keyChar = (byte)e.KeyValue;
+            _keyChar = (byte)e.KeyValue;        // just a hack for now
         }        
 
         private void OnPaint(object sender, PaintEventArgs e)
@@ -126,7 +126,7 @@ namespace Ridge.IO
             BitmapData data = _buffer.LockBits(_displayRect, ImageLockMode.WriteOnly, PixelFormat.Format1bppIndexed);
 
             IntPtr ptr = data.Scan0;
-            System.Runtime.InteropServices.Marshal.Copy(_displayData, 0, ptr, 96 * 1024);
+            System.Runtime.InteropServices.Marshal.Copy(_displayData, 0, ptr, 100 * 1024);
 
             _buffer.UnlockBits(data);
             _lock.ExitReadLock();

@@ -270,7 +270,7 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.MAINT:
-                    disassembly = String.Format("MAINT r{0},{1}", i.Rx, (MaintOpcode)i.Rx);
+                    disassembly = String.Format("MAINT r{0},{1}", i.Rx, (MaintOpcode)i.Ry);
                     break;
 
                 default:
