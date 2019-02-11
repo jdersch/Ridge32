@@ -151,15 +151,25 @@ namespace Ridge.Debugger
             }
             else if (inst.Length == 2)
             {
-                Console.WriteLine("0x{0:x8}: 0x{1:x4}              {2}", addr, _system.Memory.ReadHalfWord(addr), Ridge.CPU.Disassembler.Disassemble(inst));
+                Console.WriteLine("0x{0:x8}: 0x{1:x4}              {2}", 
+                    addr, 
+                    _system.Memory.ReadHalfWordV(addr, Memory.SegmentType.Code, out pageFault), 
+                    Ridge.CPU.Disassembler.Disassemble(inst));
             }
             else if (inst.Length == 4)
             {
-                Console.WriteLine("0x{0:x8}: 0x{1:x8}          {2}", addr, _system.Memory.ReadWord(addr), Ridge.CPU.Disassembler.Disassemble(inst));
+                Console.WriteLine("0x{0:x8}: 0x{1:x8}          {2}", 
+                    addr, 
+                    _system.Memory.ReadWordV(addr, Memory.SegmentType.Code, out pageFault), 
+                    Ridge.CPU.Disassembler.Disassemble(inst));
             }
             else if (inst.Length == 6)
             {
-                Console.WriteLine("0x{0:x8}: 0x{1:x8},0x{2:x4}   {3}", addr, _system.Memory.ReadWord(addr), _system.Memory.ReadHalfWord(addr + 4), Ridge.CPU.Disassembler.Disassemble(inst));
+                Console.WriteLine("0x{0:x8}: 0x{1:x8},0x{2:x4}   {3}", 
+                    addr, 
+                    _system.Memory.ReadWordV(addr, Memory.SegmentType.Code, out pageFault), 
+                    _system.Memory.ReadHalfWordV(addr + 4, Memory.SegmentType.Code, out pageFault), 
+                    Ridge.CPU.Disassembler.Disassemble(inst));
             }
 
             return inst.Length;

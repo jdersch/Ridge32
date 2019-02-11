@@ -22,7 +22,8 @@ namespace Ridge
             _fdlp = new FDLP(0x1, this);
             _io.RegisterDevice(0x1, _fdlp);
 
-            //_display = new Display(0x5, this);
+            //_display = new Display(0x4, this);
+            //_io.RegisterDevice(0x4, _display);
             //_io.RegisterDevice(0x5, _display);
         }
 
@@ -53,6 +54,11 @@ namespace Ridge
         public MemoryController Memory
         {
             get { return _mem; }
+        }
+
+        public FDLP FDLP
+        {
+            get { return _fdlp; }
         }
 
         public Scheduler Scheduler

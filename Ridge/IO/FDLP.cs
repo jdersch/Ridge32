@@ -46,17 +46,25 @@ namespace Ridge.IO
             // single characters.  appx. 833333ns per character at 9600 baud.
             _characterOutEvent = new Event(0, null, CharacterOutCallback);
             _floppyActionEvent = new Event(0, null, FloppyActionCallback);
-
-            using (FileStream fs = new FileStream("Disks\\SUS.img", FileMode.Open, FileAccess.Read))
-            {
-                _floppyDisk = new FloppyDisk(fs);
-            }
+            
+            _floppyDisk = new FloppyDisk("F:\\software\\ridge\\ROS\\ROS35\\004-0335.imd");
+            
         }
 
         public bool Interrupt
         {
             get { return _interrupt; }
-        }        
+        }
+
+        public void Boot()
+        {
+            //
+            // Read 8K of data starting at floppy track 2, head 0 into
+            // Ridge main memory at 0x3e000.
+            //
+            DoRead(0x3e000, 8192, 0, 2, 1);
+
+        }
 
         public uint AckInterrupt()
         {            
@@ -75,7 +83,7 @@ namespace Ridge.IO
 
                 _hack = 256;
 
-                if (_rbugReadChar && Console.KeyAvailable)
+                if (/* _rbugReadChar && */ Console.KeyAvailable)
                 {
                     ConsoleKeyInfo k = Console.ReadKey(true);
 
@@ -110,16 +118,14 @@ namespace Ridge.IO
             //            
             uint command = (data >> 24);
 
-            Console.WriteLine("addr {0:x8} data {1:x8}", addressWord, data);            
+            // Console.WriteLine("addr {0:x8} data {1:x8}", addressWord, data);            
 
             uint ret = 1;
             // 00-7F: write one character on port 0 - handshake is by bit 30
             //        (special order only used by RBUG).
             if (command < 0x80)
             {
-                //Console.WriteLine("{0} - {1}", command, (char)command);
                 Console.Write((char)command);
-
                 ret = 0;    // This should always succeed.
             }
             else
@@ -181,7 +187,6 @@ namespace Ridge.IO
 
             switch(gOrder)
             {
-                case 0: // undocumented...                    
                 case 1: // block write
                     DoBlockPortWrite(ridgeAddress, byteCount, port);
                     break;
@@ -210,7 +215,8 @@ namespace Ridge.IO
             uint dcbOffset = _dcbAddress + 0x20 * (uint)port;
             _mem.WriteHalfWord(dcbOffset + 0xa, (ushort)byteCount);
 
-            PostInterrupt(0x00800000, 0);
+            uint ioir = ((0x80 + port) << 16) | 0x8000;   // "completion of block requests"
+            PostInterrupt(ioir, port);
         }
 
         private uint StartFloppy(int drive)
@@ -232,12 +238,14 @@ namespace Ridge.IO
             byte cylinder = _mem.ReadByte(dcbOffset + 0xe);
             byte sector = _mem.ReadByte(dcbOffset + 0xf);
 
+            
             Console.WriteLine("floppy gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
                 gOrder, sOrder, ridgeAddress, byteCount, necOrder);
 
             Console.WriteLine("       head/Unit {0:x} cyl {1:x} sector {2:x}", headUnit, cylinder, sector);
+            
 
-            switch(sOrder)
+            switch(gOrder)
             {
                 case 0:
                     DoRead(ridgeAddress, byteCount, headUnit, cylinder, sector);
@@ -245,8 +253,19 @@ namespace Ridge.IO
 
                 default:
                     throw new NotImplementedException(
-                        String.Format("Unhandled GORDER {0:x}", gOrder));
+                        String.Format("Unhandled GORDER {0:x}", sOrder));
             }
+
+            // Set GSTAT (general status)
+            _mem.WriteByte(dcbOffset + 2, 0);       // always OK for now; should eventually actually return errors
+
+            // Set SSTAT (Special Status)
+            _mem.WriteByte(dcbOffset + 3, (byte)(headUnit | 0x28));        // selected head/unit + two-sided and ready bits.
+
+            // Set BYTE COUNT TRANSFERRED (always the amount requested)
+            _mem.WriteHalfWord(dcbOffset + 0xa, byteCount);
+
+
 
             return ret;
         }
@@ -262,7 +281,7 @@ namespace Ridge.IO
 
             while(bytesRead < byteCount)
             {
-                byte[] sectorData = _floppyDisk.ReadSector(cylinder, head, sector);
+                byte[] sectorData = _floppyDisk.GetSector(cylinder, head, sector).Data;
 
                 for(uint i=0;i<sectorData.Length;i++)
                 {
@@ -273,7 +292,7 @@ namespace Ridge.IO
 
                 sector++;
 
-                if (sector > 15)
+                if (sector > _floppyDisk.GetTrack(cylinder, head).SectorCount - 1)
                 {
                     sector = 0;
 

@@ -50,7 +50,8 @@ namespace Ridge.IO
         {
             _sys = sys;
             _mem = sys.Memory;
-            _deviceId = deviceId;
+            _keyboardDeviceId = deviceId;
+            _displayDeviceId = (byte)(deviceId | 0x1);
 
             // 128kb of framebuffer.
             _framebuffer = new uint[32768];           
@@ -67,10 +68,11 @@ namespace Ridge.IO
         }        
 
         public uint AckInterrupt()
-        {            
+        {
             _interrupt = false;
             return _ioir;
         }
+        
 
         public void Clock()
         {
@@ -80,12 +82,13 @@ namespace Ridge.IO
                 _hack = 250;
 
                 if (_display.KeyAvailable &&
-                   (_status & 0x10) == 0)
+                   InterruptsEnabled &&
+                   KeyboardInterruptsEnabled)                   
                 {
                     _key = _display.GetKey();  
 
                     // keyboard device + key char
-                    _ioir = (((uint)_deviceId & 0xfe) << 24) | (_key << 16);
+                    _ioir = (uint)((_keyboardDeviceId << 24) | (_key << 16));
                     _interrupt = true;
                 }
             }
@@ -126,17 +129,16 @@ namespace Ridge.IO
                     break;
 
                 case 0x8:
-                    // For now: row addr always 0, command always 0 (idle)
-                    // and we return the status bits as written.
-                    data = _status;
+                    // For now: row addr always 0, we return the last command sent
+                    // and we return the status bits as written.                    
+                    data = _status | (_lastCommand << 5);
+                    _lastCommand = 0;
                     break;
 
                 default:
                     throw new NotImplementedException(
                         String.Format("Unhandled display register {0}.", register));
             }
-
-            Console.WriteLine("reg {0:x}", register);
 
             return 1;
         }
@@ -149,7 +151,7 @@ namespace Ridge.IO
             // | dev # |       | command | register # |
             //
             uint register = addressWord & 0xf;
-            uint command = (addressWord >> 4) & 0x1f;
+            uint command = _lastCommand = (addressWord >> 4) & 0x1f;
 
             switch(register)
             {
@@ -208,17 +210,41 @@ namespace Ridge.IO
 
             }
 
-            if ((_status & 0x1) == 0)
+            if (InterruptsEnabled)
             {
                 _interrupt = true;
 
                 // display device id + 1024x800 display + command completion.
-                _ioir = (uint)(0x000000003 | (_deviceId << 24));
-            }            
-
-            // Console.WriteLine("command {0:x} reg {1:x} val {2:x} hack {3}", command, register, data, _hackCount);
+                // Bit 7 is set when the display interrupts.
+                _ioir = (uint)(0x000000003 | (_displayDeviceId << 24));                
+            }                        
 
             return 0;
+        }
+
+        private bool InterruptsEnabled
+        {
+            get { return (_status & 0x01) == 0; }
+        }
+
+        private bool KeyboardInterruptsEnabled
+        {
+            get { return (_status & 0x10) == 0; }
+        }
+
+        private bool DisplayEnabled
+        {
+            get { return (_status & 0x2) == 0; }
+        }
+
+        private bool InverseVideo
+        {
+            get { return (_status & 0x4) == 0; }
+        }
+
+        private bool TopOfScreenInterrupstEnabled
+        {
+            get { return (_status & 0x8) == 0; }
         }
 
         private void WriteBuffer()
@@ -252,12 +278,12 @@ namespace Ridge.IO
             //
             // Interrupt, if enabled.
             //
-            if ((_status & 0x8) == 0)
+            if (InterruptsEnabled && TopOfScreenInterrupstEnabled)
             {
                 _interrupt = true;
 
                 // display device id + beam at top of screen, 1024x800 display.
-                _ioir = (uint)(0x00000000a | (_deviceId << 24));
+                _ioir = (uint)(0x00000000a | (_displayDeviceId << 24));                
             }
 
             _display.Render(_framebuffer);
@@ -265,10 +291,14 @@ namespace Ridge.IO
             //
             // Schedule next frame unless the display has been turned off.
             //
-            //if ((_status & 0x2) != 0)
+            if (DisplayEnabled)
             {
                 _frameEvent.TimestampNsec = _frameTimeNsec;
                 _sys.Scheduler.Schedule(_frameEvent);
+            }
+            else
+            {
+                Array.Clear(_framebuffer, 0, _framebuffer.Length);
             }
         }
 
@@ -290,12 +320,15 @@ namespace Ridge.IO
         private uint _count;
         private uint _status;
 
+        private uint _lastCommand;
+
         private bool _interrupt;
         private uint _ioir;
 
         private RidgeSystem _sys;
         private IPhysicalMemory _mem;        
-        private byte _deviceId;
+        private byte _keyboardDeviceId;
+        private byte _displayDeviceId;
 
         private int _hack;
         private uint _key;

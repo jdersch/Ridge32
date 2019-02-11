@@ -125,7 +125,7 @@ namespace Ridge.Memory
             //  0            19 20            31
             //  | Virt. Page # | Byte in Page |
             //
-            // Yielding a 20 bite page # and 12-bit offsets in said page.
+            // Yielding a 20 bit page # and 12-bit offsets in said page.
             //
             pageFault = false;
 
@@ -160,7 +160,7 @@ namespace Ridge.Memory
                     // We have a match!  Check the validity bits.
                     // If 0, this is invalid and we take a page-fault
                     //
-                    if ((vrtEntry1 & 0xf800) == 0)
+                    if ((vrtEntry1 & 0x7000) == 0)
                     {
                         pageFault = true;
                         break;

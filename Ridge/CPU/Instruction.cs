@@ -276,7 +276,7 @@ namespace Ridge.CPU
         }
 
         /// <summary>
-        /// Decodes the instruction in physical memory at the given address.
+        /// Decodes the instruction in virtual memory at the given address.
         /// </summary>
         /// <param name="mem"></param>
         /// <param name="address"></param>

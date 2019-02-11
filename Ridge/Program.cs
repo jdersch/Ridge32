@@ -18,17 +18,10 @@ namespace Ridge
 
             Console.WriteLine("Yet-To-Be-Named Ridge emulator v0.0.\n");
 
-            // hack in boot data
-            byte[] buffer = new byte[8192];
-            using (FileStream fs = new FileStream("Boot\\bootblock.raw", FileMode.Open, FileAccess.Read))
-            {
-                fs.Read(buffer, 0, 8192);
-            }
-
-            for (uint i = 0; i < 8192; i++)
-            {
-                system.Memory.WriteByte(0x3e000 + i, buffer[i]);
-            }
+            
+            // Read in boot data from FDLP (TODO: base this on LOAD switch, etc.)
+            system.FDLP.Boot();
+            
 
             DebugPrompt debugger = new DebugPrompt(system);
             _execState = ExecutionState.Debug;
@@ -47,22 +40,22 @@ namespace Ridge
                         break;
 
                     case ExecutionState.Go:
-                        //try
+                        try
                         {
                             system.Clock();
                         }
-                        //catch(Exception e)
+                        catch(Exception e)
                         {
-                        //    Console.WriteLine("Execution error: {0}", e.Message);
-                          //  _execState = ExecutionState.Debug;
+                            Console.WriteLine("Execution error: {0}", e.Message);
+                            _execState = ExecutionState.Debug;
                         }
                         break;
 
                 }
 
-                if (Hackeroo)
+                if (Hackeroo) // || system.CPU.PC == 0x0004341e)
                 {
-                   //_execState = ExecutionState.Step;
+                   _execState = ExecutionState.Step;
                    Hackeroo = false;
                 }
             }            

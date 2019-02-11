@@ -110,32 +110,9 @@ namespace Ridge.CPU
 
         public void Execute()
         {
-            //
-            // Check for pending external interrupts.
-            _intDevice = _io.InterruptRequested();
-
-            if (_intDevice != null && !_externalInterrupt)
-            {
-                //
-                // Yes, we have an external interrupt.
-                // Signal an event and do what needs to be done...
-                //
-                SignalEvent(EventType.ExternalInterrupt);
-
-                //
-                // Set the external interrupt flag.  This is used by the ITEST
-                // MAINT instruction to allow polling for interrupts in Kernel mode.
-                // I am unsure if this is an accurate representation of
-                // the actual Ridge behavior, the documentation is 
-                // unclear.
-                //
-                _externalInterrupt = true;
-            }
-
-            //
-            // Update timers and check for overflow
-            //
-            UpdateTimers();
+            // Save PC at the start of this instruction so it can be used.
+            // for displacements and traps / events.
+            _opc = _pc;
 
             //
             // Decode the current instruction.
@@ -144,15 +121,20 @@ namespace Ridge.CPU
             // time around which is slow and causes GCs, but is simple while we get
             // this thing off the ground.
             //
-
-            // Save PC pre-increment.
-            uint opc = _pc;
             bool pageFault = false;
             Instruction i = new Instruction(_mem, _pc, out pageFault);
 
+            // Console.WriteLine("{0}, {1:x8}: {2}", _mode == ProcessorMode.Kernel ? "K" : "U", _pc, Disassembler.Disassemble(i));
+
             if (pageFault)
             {
-                SignalEvent(EventType.PageFault);
+                // SR1 = -1 (page is absent)
+                // SR2 = code segment
+                // SR3 = current PC
+                // SR15 = current PC
+                SignalEvent(EventType.PageFault, 0xffffffff, _sr[8], _pc);
+
+                // Abandon this instruction.
                 return;
             }
 
@@ -208,7 +190,7 @@ namespace Ridge.CPU
 
                 case Opcode.AND:
                     _r[i.Rx] &= _r[i.Ry];
-                    break;
+                    break;                
 
                 case Opcode.CBIT:
                     {
@@ -268,8 +250,7 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.NOTI_i:
-                    // TODO: does this get masked to 4 bits?
-                    _r[i.Rx] = (uint)(~i.Ry & 0xf);
+                    _r[i.Rx] = (uint)(~i.Ry);
                     break;
 
                 case Opcode.ANDI_i:
@@ -292,10 +273,7 @@ namespace Ridge.CPU
                 case Opcode.RMPY:
                 case Opcode.RDIV:
                 case Opcode.MAKERD:
-                case Opcode.FLOAT:
-                case Opcode.EADD:
-                case Opcode.ESUB:                
-                case Opcode.EDIV:
+                case Opcode.FLOAT:                
                 case Opcode.DFIXT:
                 case Opcode.DFIXR:
                 case Opcode.DRNEG:
@@ -309,11 +287,15 @@ namespace Ridge.CPU
                     throw new NotImplementedException();
 
                 case Opcode.FIXT:
-                    float fVal = GetFloatFromWord(_r[i.Ry]);
-                    _r[i.Rx] = Convert.ToUInt32(fVal);
+                    //float fVal = GetFloatFromWord(_r[i.Ry]);
+                    //_r[i.Rx] = Convert.ToUInt32(fVal);
+                    throw new NotImplementedException("FIXT");
                     break;
 
                 case Opcode.RCOMP:
+                    throw new NotImplementedException("RCOMP");
+
+                    /*
                     {
                         float rx = GetFloatFromWord(_r[i.Rx]);
                         float ry = GetFloatFromWord(_r[i.Ry]);
@@ -330,6 +312,27 @@ namespace Ridge.CPU
                         {
                             _r[i.Rx] = 1;
                         }
+                    } */
+                    break;
+
+                case Opcode.EADD:
+                    long res = _r[i.Rx] + _r[i.Ry];
+                    _r[0] = (uint)((res & 0x100000000) != 0 ? 1 : 0);
+                    _r[i.Rx] = (uint)res;
+                    break;
+
+                case Opcode.ESUB:
+                    throw new NotImplementedException("ESUB");
+                    break;
+
+                case Opcode.EDIV:
+                    {
+                        ulong rp = GetRegisterPairValue(i.Rx);
+
+                        _r[i.Rx] = (uint)(rp / _r[i.Ry]);
+                        _r[i.Rx + 1] = (uint)(rp % _r[i.Ry]);
+
+                        // TODO: this can trap if result > 32 bits or on div-by-zero                    
                     }
                     break;
 
@@ -533,7 +536,7 @@ namespace Ridge.CPU
 
                 case Opcode.MAINT:                    
                     if (!(_mode == ProcessorMode.Kernel ||  // Not kernel mode
-                         ((_sr[10] & 0x1) == 1)))           // Not privileged user mode
+                         PrivilegedAccess()))           // Not privileged user mode
                     {
                         Trap(TrapType.KernelViolation);
                         break;
@@ -561,24 +564,24 @@ namespace Ridge.CPU
                             // TODO: actually interface to all the above things.
                             // Right now, just return 0 for everything, this indicates
                             // that the load enable switch is off (so we just get dumped into RBUG)
-                            _r[i.Rx] = (uint)(_externalInterrupt ? 0x10 : 0x00);
+                            _r[i.Rx] = (uint)(_externalInterruptDevice != null ? 0x10 : 0x00);
                             break;
 
                         case MaintOpcode.TRAPEXIT:
                             // "The TRAPEXIT instruction sets PC to the value contained in SR0 and begins
                             //  executing at that address...
                             //  The TRAPEXIT instruction flushes the cache and the TMT."
-                            _pc = _sr[0];
+                            _pc = _sr[0];                            
                             break;
 
                         case MaintOpcode.ITEST:
-                            if (_externalInterrupt)
+                            if (_externalInterruptDevice != null)
                             {
-                                _r[(i.Rx + 1) & 0xf] = _intDevice.AckInterrupt();
+                                _r[(i.Rx + 1) & 0xf] = _externalInterruptDevice.AckInterrupt();
                                 _r[i.Rx] = 0;
 
-                                // clear the interrupt flip flop.
-                                _externalInterrupt = false;
+                                // clear the interrupt
+                                _externalInterruptDevice = null;
                             }
                             else
                             {
@@ -606,6 +609,10 @@ namespace Ridge.CPU
                             _r[i.Rx] = 0x000100f0;
                             break;
 
+                        case MaintOpcode.FLUSH:
+                            // this is a no-op since we cache nothing at the moment.
+                            break;
+
                         default:
                             throw new NotImplementedException(
                                 String.Format("Unimplemented MAINT instruction {0}.", (MaintOpcode)i.Ry));
@@ -613,7 +620,8 @@ namespace Ridge.CPU
 
                     break;
                 case Opcode.READ:
-                    if (_mode != ProcessorMode.Kernel)
+                    if (_mode != ProcessorMode.Kernel &&
+                        !PrivilegedAccess())
                     {
                         Trap(TrapType.KernelViolation);
                         break;
@@ -627,7 +635,8 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.WRITE:
-                    if (_mode != ProcessorMode.Kernel)
+                    if (_mode != ProcessorMode.Kernel &&
+                        !PrivilegedAccess())
                     {
                         Trap(TrapType.KernelViolation);
                         break;
@@ -652,9 +661,9 @@ namespace Ridge.CPU
                     _r[i.Rx] = (uint)(((int)_r[i.Rx] == (int)_r[i.Ry]) ? 1 : 0);
                     break;
 
-                case Opcode.CALLR:
+                case Opcode.CALLR:                    
+                    _pc = _opc + _r[i.Ry];  // remove + 2 added in
                     _r[i.Rx] = _pc;     // + 2 already added in
-                    _pc = opc + _r[i.Ry];  // remove + 2 added in
                     break;
 
                 case Opcode.TEST_gti:
@@ -695,8 +704,8 @@ namespace Ridge.CPU
                         SignalEvent(EventType.KernelViolation, (uint)i.Op, (uint)i.Rx, (uint)i.Ry);
                     }
                     else
-                    {
-                        SignalEvent(EventType.KCALL, (uint)((i.Rx << 4) | i.Ry));
+                    {                        
+                        SignalEvent(EventType.KCALL, (uint)((i.Rx << 4) | i.Ry));                        
                     }
                     break;
 
@@ -1054,61 +1063,96 @@ namespace Ridge.CPU
 
                 case Opcode.LOADB_cs:
                 case Opcode.LOADB_cl:
-                    ReadByte(i.Rx, (uint)(opc + i.Displacement), SegmentType.Code);
+                    ReadByte(i.Rx, (uint)(_opc + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOADB_csx:
                 case Opcode.LOADB_clx:
-                    ReadByte(i.Rx, (uint)(opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
+                    ReadByte(i.Rx, (uint)(_opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOADH_cs:
                 case Opcode.LOADH_cl:
-                    ReadHalfWord(i.Rx, (uint)(opc + i.Displacement), SegmentType.Code);
+                    ReadHalfWord(i.Rx, (uint)(_opc + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOADH_csx:
                 case Opcode.LOADH_clx:
-                    ReadHalfWord(i.Rx, (uint)(opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
+                    ReadHalfWord(i.Rx, (uint)(_opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOAD_cs:
                 case Opcode.LOAD_cl:
-                    ReadWord(i.Rx, (uint)(opc + i.Displacement), SegmentType.Code);
+                    ReadWord(i.Rx, (uint)(_opc + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOAD_csx:
                 case Opcode.LOAD_clx:
-                    ReadWord(i.Rx, (uint)(opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
+                    ReadWord(i.Rx, (uint)(_opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOADD_cs:
                 case Opcode.LOADD_cl:
-                    ReadDoubleWord(i.Rx, (uint)(opc + i.Displacement), SegmentType.Code);
+                    ReadDoubleWord(i.Rx, (uint)(_opc + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LOADD_csx:
                 case Opcode.LOADD_clx:
-                    ReadDoubleWord(i.Rx, (uint)(opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
+                    ReadDoubleWord(i.Rx, (uint)(_opc + (int)_r[i.Ry] + i.Displacement), SegmentType.Code);
                     break;
 
                 case Opcode.LADDR_cs:
                 case Opcode.LADDR_cl:
-                    _r[i.Rx] = (uint)(opc + i.Displacement);
+                    _r[i.Rx] = (uint)(_opc + i.Displacement);
                     break;
 
                 case Opcode.LADDR_csx:
                 case Opcode.LADDR_clx:
-                    _r[i.Rx] = (uint)(opc + (int)_r[i.Ry] + i.Displacement);
+                    _r[i.Rx] = (uint)(_opc + (int)_r[i.Ry] + i.Displacement);
                     break;
 
                 default:
                     // Should eventually Trap.  Throw at the moment while debugging.
+                    /*
                     throw new NotImplementedException(
-                        String.Format("Unimplemented opcode {0}.", i.Op));
-                    // SignalEvent(EventType.IllegalInstruction, (uint)i.Op, _sr[8], _pc);
+                        String.Format("Unimplemented opcode {0:x8} ({1}).", (uint)i.Op, i.Op)); */
+                    SignalEvent(EventType.IllegalInstruction, (uint)i.Op, _sr[8], _pc);
                     break;
             }
+
+            //
+            // Check for pending external interrupts if there isn't already
+            // one pending.
+            //
+            if (_externalInterruptDevice == null)
+            {
+                //
+                // _externalInterruptDevice doubles as the external interrupt flag.  
+                // This is used by the ITEST
+                // MAINT instruction to allow polling for interrupts in Kernel mode.
+                // I am unsure if this is an accurate representation of
+                // the actual Ridge behavior, the documentation is 
+                // unclear.
+                //                    
+                _externalInterruptDevice = _io.InterruptRequested();
+
+                if (_externalInterruptDevice != null)
+                {
+                    //
+                    // Yes, we have an external interrupt.
+                    // Signal an event and do what needs to be done...
+                    //
+                    if (_mode == ProcessorMode.User)
+                    {
+                        SignalEvent(EventType.ExternalInterrupt);
+                    }
+                }
+            }
+
+            //
+            // Update timers and check for overflow
+            //
+            UpdateTimers();
         }
 
         //
@@ -1122,7 +1166,11 @@ namespace Ridge.CPU
             
             if (pageFault)
             {
-                SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
+                // SR1 = - 1 (page was not present)
+                SignalEvent(
+                    EventType.PageFault, 
+                    0xffffffff, segment == SegmentType.Code ? _sr[8] : _sr[9], 
+                    address);
             }
             else
             {
@@ -1143,7 +1191,11 @@ namespace Ridge.CPU
 
                 if (pageFault)
                 {
-                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
+                    // SR1 = - 1 (page was not present)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff, segment == SegmentType.Code ? _sr[8] : _sr[9],
+                        address);
                 }
                 else
                 {
@@ -1165,7 +1217,11 @@ namespace Ridge.CPU
 
                 if (pageFault)
                 {
-                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
+                    // SR1 = - 1 (page was not present)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff, segment == SegmentType.Code ? _sr[8] : _sr[9],
+                        address);
                 }
                 else
                 {
@@ -1187,7 +1243,11 @@ namespace Ridge.CPU
 
                 if (pageFault)
                 {
-                    SignalEvent(EventType.PageFault, segment == SegmentType.Code ? _sr[8] : _sr[9], address);
+                    // SR1 = - 1 (page was not present)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff, segment == SegmentType.Code ? _sr[8] : _sr[9],
+                        address);
                 }
                 else
                 {
@@ -1200,7 +1260,12 @@ namespace Ridge.CPU
         {                        
             if (_mem.WriteByteV(address, value))
             {
-                SignalEvent(EventType.PageFault, _sr[9], address);
+                // TODO: set SR1 appropriately (absent from memory vs. write protected)
+                SignalEvent(
+                    EventType.PageFault,
+                    0xffffffff,
+                    _sr[9],
+                    address);
             }
         }
 
@@ -1214,7 +1279,12 @@ namespace Ridge.CPU
             {
                 if (_mem.WriteHalfWordV(address, value))
                 {
-                    SignalEvent(EventType.PageFault, _sr[9], address);
+                    // TODO: set SR1 appropriately (absent from memory vs. write protected)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff,
+                        _sr[9],
+                        address);
                 }
             }
         }
@@ -1229,7 +1299,12 @@ namespace Ridge.CPU
             {
                 if (_mem.WriteWordV(address, value))
                 {
-                    SignalEvent(EventType.PageFault, _sr[9], address);
+                    // TODO: set SR1 appropriately (absent from memory vs. write protected)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff,
+                        _sr[9],
+                        address);
                 }
             }
         }
@@ -1244,7 +1319,12 @@ namespace Ridge.CPU
             {
                 if (_mem.WriteDoubleWordV(address, value))
                 {
-                    SignalEvent(EventType.PageFault, _sr[9], address);
+                    // TODO: set SR1 appropriately (absent from memory vs. write protected)
+                    SignalEvent(
+                        EventType.PageFault,
+                        0xffffffff,
+                        _sr[9],
+                        address);
                 }
             }
         }
@@ -1287,19 +1367,19 @@ namespace Ridge.CPU
             switch (e)
             {
                 case EventType.KCALL:
-                    _sr[15] = _pc;
+                    _sr[15] = _pc;                 // Next PC after KCALL
                     e = (EventType)(d0 * 4);       // calculate CCB address                    
                     break;
 
                 case EventType.IllegalInstruction:
                     if (_mode == ProcessorMode.Kernel)
                     {
-                        _sr[0] = _pc;
+                        _sr[0] = d2;              // Current PC
                     }
                     else
                     {
                         _sr[0] = 1;
-                        _sr[15] = _pc;
+                        _sr[15] = d2;             // Current PC
                     }
 
                     _sr[1] = d0;    // opcode
@@ -1313,9 +1393,10 @@ namespace Ridge.CPU
                     // in User mode.  Kernel mode has to poll using ITEST.
                     if (_mode == ProcessorMode.User)
                     {
-                        _sr[0] = _intDevice.AckInterrupt();
+                        _sr[0] = _externalInterruptDevice.AckInterrupt();
                         _sr[15] = _pc;
-                    }                   
+                        _externalInterruptDevice = null;
+                    }
                     else
                     {
                         // No External Interrupts in Kernel mode.
@@ -1333,20 +1414,21 @@ namespace Ridge.CPU
 
                 case EventType.PageFault:
                     _sr[0] = 1;
-                    _sr[2] = d0;
-                    _sr[3] = d1;
-                    _sr[15] = _pc;
+                    _sr[1] = d0;
+                    _sr[2] = d1;
+                    _sr[3] = d2;
+                    _sr[15] = _opc;
                     break;
 
                 case EventType.KernelViolation:
                     if (_mode == ProcessorMode.Kernel)
                     {
-                        _sr[0] = _pc;
+                        _sr[0] = _opc;
                     }
                     else
                     {
                         _sr[0] = 1;
-                        _sr[15] = _pc;
+                        _sr[15] = _opc;
                     }
 
                     _sr[1] = d0;
@@ -1411,12 +1493,10 @@ namespace Ridge.CPU
 
                 if ((int)timer1 < 0)
                 {
-                    //Console.WriteLine("timer 1");
                     SignalEvent(EventType.Timer1Interrupt);
                 }
                 else if ((int)timer2 < 0)
-                {
-                    //Console.WriteLine("timer 2");
+                {                    
                     SignalEvent(EventType.Timer2Interrupt);
                 }
 
@@ -1430,8 +1510,17 @@ namespace Ridge.CPU
             }
         }
 
+        private bool PrivilegedAccess()
+        {
+            // Bit 31 of the Traps word (SR10) is the PP bit; if set
+            // the current User process can execute certain privileged instructions
+            // (like READ and WRITE)
+            return (_sr[10] & 0x1) != 0;
+        }
+
         private void Trap(TrapType t)
         {
+            Console.WriteLine(t);
             throw new NotImplementedException("Traps not yet implemented.");
         }
 
@@ -1470,7 +1559,8 @@ namespace Ridge.CPU
         private uint[] _r = new uint[16];
         private uint[] _sr = new uint[16];
 
-        private uint _pc;
+        private uint _opc;  // original PC before increment during execution
+        private uint _pc;  
 
         private Memory.MemoryController  _mem;
         private IOBus           _io;    
@@ -1478,13 +1568,7 @@ namespace Ridge.CPU
         //
         // The currently interrupting external device
         //
-        private IIODevice       _intDevice;
-
-        //
-        // Whether an external interrupt has occurred since the last
-        // ITEST MAINT instruction.
-        //
-        private bool            _externalInterrupt;
+        private IIODevice       _externalInterruptDevice;
 
         //
         // Timer timing

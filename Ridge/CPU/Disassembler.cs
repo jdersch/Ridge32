@@ -274,7 +274,7 @@ namespace Ridge.CPU
                     break;
 
                 default:
-                    disassembly = String.Format("Illegal Opcode 0x{0}", i.Op);
+                    disassembly = String.Format("Illegal Opcode 0x{0:x8} (1)", (int)i.Op, i.Op);
                     break;
             }
 
