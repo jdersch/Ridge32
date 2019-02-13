@@ -8,6 +8,7 @@ using Ridge.CPU;
 using Ridge.Memory;
 using Ridge.IO.Disk;
 using System.IO;
+using Ridge.Logging;
 
 namespace Ridge.IO
 {
@@ -42,13 +43,15 @@ namespace Ridge.IO
             _mem = sys.Memory;
             _deviceId = deviceId;
 
+            _handshake = 0;
+
             // Character send callback used for handshaking between ridge/fdlp when sending
             // single characters.  appx. 833333ns per character at 9600 baud.
             _characterOutEvent = new Event(0, null, CharacterOutCallback);
             _floppyActionEvent = new Event(0, null, FloppyActionCallback);
             
-            _floppyDisk = new FloppyDisk("F:\\software\\ridge\\ROS\\ROS35\\004-0335.imd");
-            
+            _floppyDisk = new FloppyDisk("F:\\software\\ridge\\ROS\\ROS35\\004-2761.imd");
+            //_floppyDisk = new FloppyDisk("Disks\\sus.imd");
         }
 
         public bool Interrupt
@@ -79,19 +82,27 @@ namespace Ridge.IO
             // Real dirty hack for RBUG console input for now
             if (_hack == 0)
             {
-                _handshake = 0;
-
                 _hack = 256;
 
-                if (/* _rbugReadChar && */ Console.KeyAvailable)
+                if (Console.KeyAvailable)
                 {
-                    ConsoleKeyInfo k = Console.ReadKey(true);
+                    if (_rbugReadCharC2)
+                    {
+                        ConsoleKeyInfo k = Console.ReadKey(true);
+                        _lastUnit = k.KeyChar;
+                        _handshake = 0;
+                        _rbugReadCharC2 = false;
+                    }
 
-                    // This is always unit 0 for now...
-                    PostInterrupt(0x00880000 | (uint)(k.KeyChar << 8), 0);
+                    if (_rbugReadCharFF)
+                    {
+                        ConsoleKeyInfo k = Console.ReadKey(true);
 
-                    _rbugReadChar = false;
-                }                
+                        // This is always unit 0 for now...
+                        PostInterrupt(0x00880000 | (uint)(k.KeyChar << 8), 0);
+                        _rbugReadCharFF = false;
+                    }
+                }
             }
         }
 
@@ -103,8 +114,9 @@ namespace Ridge.IO
             //  0         7 8         15       30    31
             //  | device # | last unit |      | H/S | |
             //
-            data = (uint)((_deviceId << 24) | (_lastUnit << 16) | (_handshake << 1));            
-            return _handshake;
+            // TODO: Ridge software seems to expect bit 8 to be set here...
+            data = (uint)((_deviceId << 24) | ((0x80 | _lastUnit) << 16) | (_handshake << 1));
+            return 0;
         }
 
         public uint Write(uint addressWord, uint data)
@@ -120,13 +132,20 @@ namespace Ridge.IO
 
             // Console.WriteLine("addr {0:x8} data {1:x8}", addressWord, data);            
 
-            uint ret = 1;
+            // For now assume everything succeeds...
+            uint ret = 0;
+
             // 00-7F: write one character on port 0 - handshake is by bit 30
             //        (special order only used by RBUG).
             if (command < 0x80)
             {
                 Console.Write((char)command);
-                ret = 0;    // This should always succeed.
+                //_handshake = 1;
+
+                // Schedule handshake event
+                //_characterOutEvent.TimestampNsec = _characterOutTimeNsec;
+                //_characterOutEvent.Context = (char)command;
+                //_sys.Scheduler.Schedule(_characterOutEvent);
             }
             else
             {                
@@ -140,27 +159,31 @@ namespace Ridge.IO
                         ret = StartFloppy(0);
                         break;
 
-                    case 0xff: 
+                    case 0xc2:
+                        // "Special read from port 0 -- no interrupts, handshake is by bit 30"
+                        // No, that's not vague AT ALL.
+                        _rbugReadCharC2 = true;                        
+                        _handshake = 1;
+                        break;
+
+                    case 0xc3:
+                        break;
+
+                    case 0xff:
                         //
                         // This command is undocumented, but it appears to be sent when RBUG (and other
                         // code that uses primitive port I/O) wants to read a single character
                         // from Port 0... IOIR is then set and the interrupt flag is raised...
                         // This despite command C2 apparently being defined to do just this.
                         //
-                        _rbugReadChar = true;
+                        _rbugReadCharFF = true;                        
                         break;
 
                     default:
-                        Console.WriteLine("Unimplemented FDLP command {0:x2}", command);
+                        throw new NotImplementedException(String.Format("Unimplemented FDLP command 0x{0:x}", command));
                         break;
                 }
             }
-
-            _handshake = 1;
-
-            // Schedule handshake event
-            //_characterOutEvent.TimestampNsec = _characterOutTimeNsec;
-            //_sys.Scheduler.Schedule(_characterOutEvent);
 
             return ret;
         }
@@ -182,7 +205,8 @@ namespace Ridge.IO
             uint ridgeAddress = _mem.ReadWord(dcbOffset + 5) >> 8;
             ushort byteCount = (ushort)(_mem.ReadHalfWord(dcbOffset + 8));
 
-            Console.WriteLine("port {0} gOrder {1:x} sOrder {2:x} gStat {3:x} sStat {4:x} retries {5:x} ridgeAddress {6:x8} byteCount {7:x4}",
+            Log.Write(LogComponent.FDLP, 
+                "Port Write: port {0} gOrder {1:x} sOrder {2:x} gStat {3:x} sStat {4:x} retries {5:x} ridgeAddress {6:x8} byteCount {7:x4}",
                 port, gOrder, sOrder, gStat, sStat, retries, ridgeAddress, byteCount);
 
             switch(gOrder)
@@ -236,13 +260,16 @@ namespace Ridge.IO
 
             byte headUnit = _mem.ReadByte(dcbOffset + 0xd);
             byte cylinder = _mem.ReadByte(dcbOffset + 0xe);
-            byte sector = _mem.ReadByte(dcbOffset + 0xf);
+            byte sector = _mem.ReadByte(dcbOffset + 0xf);            
 
             
-            Console.WriteLine("floppy gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
+            Log.Write(LogComponent.FDLP, 
+                "Floppy gOrder {0:x} sOrder {1:x} ridgeAddress {2:x8} byteCount {3:x4} necOrder {4:x}",
                 gOrder, sOrder, ridgeAddress, byteCount, necOrder);
 
-            Console.WriteLine("       head/Unit {0:x} cyl {1:x} sector {2:x}", headUnit, cylinder, sector);
+            Log.Write(LogComponent.FDLP,
+                "       head/Unit {0:x} cyl {1:x} sector {2:x}", 
+                headUnit, cylinder, sector);
             
 
             switch(gOrder)
@@ -264,8 +291,6 @@ namespace Ridge.IO
 
             // Set BYTE COUNT TRANSFERRED (always the amount requested)
             _mem.WriteHalfWord(dcbOffset + 0xa, byteCount);
-
-
 
             return ret;
         }
@@ -306,6 +331,10 @@ namespace Ridge.IO
                 }
             }
 
+            /*
+            _floppyActionEvent.TimestampNsec = _floppyActionTimeNsec;
+            _sys.Scheduler.Schedule(_floppyActionEvent);
+            */
             PostInterrupt(0x00800000, 6);
         }
 
@@ -313,6 +342,8 @@ namespace Ridge.IO
         {
             // Reset handshake.
             _handshake = 0;
+
+            Console.Write((char)context);
         }
 
         private void FloppyActionCallback(ulong timeNsec, ulong skewNsec, object context)
@@ -332,7 +363,8 @@ namespace Ridge.IO
 
         private uint _lastUnit;
         private uint _handshake;
-        private bool _rbugReadChar;
+        private bool _rbugReadCharFF;
+        private bool _rbugReadCharC2;
 
         private int _hack = 1000;
         private bool _hackInterrupt;

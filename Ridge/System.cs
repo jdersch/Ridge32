@@ -29,6 +29,9 @@ namespace Ridge
 
         public void Reset()
         {
+            // Read in bootstrap from FDLP (TODO: base this on LOAD switch, etc.)
+            FDLP.Boot();
+
             _cpu.Reset();
         }
 

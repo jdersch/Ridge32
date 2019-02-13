@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 using Ridge.CPU;
+using Ridge.Logging;
 using Ridge.Memory;
 
 namespace Ridge.IO
@@ -110,6 +111,9 @@ namespace Ridge.IO
             switch (register)
             {
                 case 0x0:
+                    // Used by "WHAT" to identify the keyboard/display devices.
+                    // Unsure if it has any other purpose.
+                    data = 0xffffffff;
                     break;
 
                 case 0x1:
@@ -131,8 +135,9 @@ namespace Ridge.IO
                 case 0x8:
                     // For now: row addr always 0, we return the last command sent
                     // and we return the status bits as written.                    
-                    data = _status | (_lastCommand << 5);
-                    _lastCommand = 0;
+                    data = 0xffffffff; // ~((_status & 0x1f) | (_lastCommand << 5) | ((_rowAddr & 0x3ff) << 9));
+                    //_lastCommand++;
+                    _rowAddr++;
                     break;
 
                 default:
@@ -140,7 +145,9 @@ namespace Ridge.IO
                         String.Format("Unhandled display register {0}.", register));
             }
 
-            return 1;
+            Log.Write(LogComponent.Display, "Read register {0}, returning 0x{1:x}", register, data);
+
+            return 0;
         }
 
         public uint Write(uint addressWord, uint data)
@@ -160,26 +167,31 @@ namespace Ridge.IO
 
                 case 0x1:
                     _dar = data & 0xffff;
+                    Log.Write(LogComponent.Display, "DAR write 0x{0}", _dar);
                     break;
 
                 case 0x2:
                     _mar = data >> 6;
+                    Log.Write(LogComponent.Display, "MAR write 0x{0}", _mar);
                     break;
 
                 case 0x4:                    
                     _count = data >> 16;
+                    Log.Write(LogComponent.Display, "Count write 0x{0}", _count);
                     break;
 
                 case 0x5:
                     _dar = data & 0xffff;
                     _count = data >> 16;
+                    Log.Write(LogComponent.Display, "DAR write 0x{0}", _dar);
+                    Log.Write(LogComponent.Display, "Count write 0x{0}", _count);
                     break;
 
                 case 0x8:
                     // TODO: i think the sense may be inverted from what the manual says
                     // on these bits...
                     _status = data;
-                    Console.WriteLine("status {0:x}", _status);
+                    Log.Write(LogComponent.Display, "Status write 0x{0}", _status);
                     break;
 
                 default:
@@ -201,14 +213,19 @@ namespace Ridge.IO
                     ReadBuffer();
                     break;
 
+                case 0xb:
+                    ScrollUp();
+                    break;
+
                 case 0xf:
                     break;
 
                 default:
                     throw new NotImplementedException(
                         String.Format("Unhandled display command {0:x}.", command));
-
             }
+
+            Log.Write(LogComponent.Display, "Command 0x{0}", command);
 
             if (InterruptsEnabled)
             {
@@ -273,6 +290,15 @@ namespace Ridge.IO
             }
         }
 
+        private void ScrollUp()
+        {
+            //
+            // On a scroll operation, the MAR contains the destination address in the scroll buffer
+            // and the DAR contains the source address.
+            //
+            Array.Copy(_framebuffer, _dar, _framebuffer, _mar, _framebuffer.Length - (_dar - _mar));
+        }
+
         private void FrameCompleteCallback(ulong timeNsec, ulong skewNsec, object context)
         {
             //
@@ -283,7 +309,7 @@ namespace Ridge.IO
                 _interrupt = true;
 
                 // display device id + beam at top of screen, 1024x800 display.
-                _ioir = (uint)(0x00000000a | (_displayDeviceId << 24));                
+                _ioir = (uint)(0x00000000a | (_displayDeviceId << 24));
             }
 
             _display.Render(_framebuffer);
@@ -299,6 +325,7 @@ namespace Ridge.IO
             else
             {
                 Array.Clear(_framebuffer, 0, _framebuffer.Length);
+                _display.Render(_framebuffer);
             }
         }
 
@@ -321,6 +348,7 @@ namespace Ridge.IO
         private uint _status;
 
         private uint _lastCommand;
+        private uint _rowAddr;        
 
         private bool _interrupt;
         private uint _ioir;

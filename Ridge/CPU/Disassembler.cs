@@ -253,7 +253,7 @@ namespace Ridge.CPU
                     disassembly = String.Format("BR 0x{0:x}{1} [0x{2:x}]", i.Displacement, GetLength(i), i.BranchAddress);
                     break;
 
-                case Opcode.MOVE_r:
+                case Opcode.MOVE_rs:
                     disassembly = String.Format("MOVE sr{0},r{1}", i.Rx, i.Ry);
                     break;
 

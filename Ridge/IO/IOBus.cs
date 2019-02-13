@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Ridge.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -45,13 +46,14 @@ namespace Ridge.IO
                 // a device timeout.
                 // Bit 31 : "0" is OK, "1" is I/O device not ready to accept command.
                 // Bit 30 : "0" is OK, "1" is device timed out and did not respond.
-                Console.WriteLine("Nonexistent device {0:x} on read.", address);
+                Log.Write(LogComponent.IOBus, "Nonexistent device {0:x} on read.", address);
                 data = 0;
-                return 0x3;
+                return 0x2;
             }
             else
             {
                 // Let the device deal with this.
+                Log.Write(LogComponent.IOBus, "IO Read: Address 0x{0:x} DeviceData 0x{1:x}", address, deviceData);
                 return _deviceMap[address].Read(deviceData, out data);
             }
         }
@@ -64,13 +66,14 @@ namespace Ridge.IO
                 // a device timeout.
                 // Bit 31 : "0" is OK, "1" is I/O device not ready to accept command.
                 // Bit 30 : "0" is OK, "1" is device timed out and did not respond.
-                Console.WriteLine("Nonexistent device {0:x} on write.", address);
+                Log.Write(LogComponent.IOBus, "Nonexistent device {0:x} on write.", address);
                 data = 0;
-                return 0x3;
+                return 0x2;
             }
             else
             {
                 // Let the device deal with this.
+                Log.Write(LogComponent.IOBus, "IO Write: Address 0x{0:x} DeviceData 0x{1:x} Data 0x{2:x}", address, deviceData, data);
                 return _deviceMap[address].Write(deviceData, data);
             }
         }

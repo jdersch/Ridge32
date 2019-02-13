@@ -49,15 +49,19 @@ namespace Ridge.Debugger
                         break;
 
                     case "g":
+                        if (tokens.Length > 1)
+                        {
+                            _system.CPU.PC = uint.Parse(tokens[1], System.Globalization.NumberStyles.HexNumber);
+                        }
                         next = ExecutionState.Go;
                         done = true;
                         break;
 
-                    case "d":
-
+                    case "dv":
+                    case "dp":
                         if (tokens.Length < 2)
                         {
-                            Console.WriteLine("d <addr> [length]");
+                            Console.WriteLine("dp (or dv) <addr> [length]");
                         }
                         else
                         {
@@ -68,7 +72,14 @@ namespace Ridge.Debugger
 
                                 for (uint i = start; i < start + length; )
                                 {
-                                    i += Disassemble(i);
+                                    if (tokens[0].ToLowerInvariant() == "dv")
+                                    {
+                                        i += DisassembleVirtual(i);
+                                    }
+                                    else
+                                    {
+                                        i += DisassemblePhysical(i);
+                                    }
                                 }
                             }
                             catch(Exception e)
@@ -78,6 +89,52 @@ namespace Ridge.Debugger
                         }
 
                         next = ExecutionState.Debug;
+                        break;
+
+                    case "trans":
+                        if (tokens.Length < 2)
+                        {
+                            Console.WriteLine("trans <addr> [code|data]");
+                        }
+                        else
+                        {
+                            uint vaddr = uint.Parse(tokens[1], System.Globalization.NumberStyles.HexNumber);
+                            bool codeSegment = true;
+                            if (tokens.Length > 2)
+                            {
+                                switch(tokens[2].ToLowerInvariant())
+                                {
+                                    case "code":
+                                        codeSegment = true;
+                                        break;
+
+                                    case "data":
+                                        codeSegment = false;
+                                        break;
+
+                                    default:
+                                        Console.WriteLine("invalid segment arg, assuming code segment.");
+                                        break;
+                                }
+                            }
+
+                            bool pageFault = false;
+                            uint translatedAddress = _system.Memory.TranslateVirtualToReal(
+                                codeSegment ? _system.CPU.SR[8] : _system.CPU.SR[9],
+                                vaddr,
+                                false,
+                                false,
+                                out pageFault);
+
+                            if (pageFault)
+                            {
+                                Console.WriteLine("Page Fault.");
+                            }
+                            else
+                            {
+                                Console.WriteLine("PA 0x{0:x}", translatedAddress);
+                            }
+                        }
                         break;
 
                     case "m":
@@ -137,11 +194,12 @@ namespace Ridge.Debugger
 
             Console.WriteLine("\nPC=0x{0:x8} Mode={1}", _system.CPU.PC, _system.CPU.Mode);
             
-            Disassemble(_system.CPU.PC);
+            DisassembleVirtual(_system.CPU.PC);
         }
 
-        private uint Disassemble(uint addr)
+        private uint DisassembleVirtual(uint addr)
         {
+            // TODO: disassembling virtual addresses here ends up modifying the Referenced bits!
             bool pageFault = false;
             CPU.Instruction inst = new CPU.Instruction(_system.Memory, addr, out pageFault);
            
@@ -169,6 +227,36 @@ namespace Ridge.Debugger
                     addr, 
                     _system.Memory.ReadWordV(addr, Memory.SegmentType.Code, out pageFault), 
                     _system.Memory.ReadHalfWordV(addr + 4, Memory.SegmentType.Code, out pageFault), 
+                    Ridge.CPU.Disassembler.Disassemble(inst));
+            }
+
+            return inst.Length;
+        }
+
+        private uint DisassemblePhysical(uint addr)
+        {
+            CPU.Instruction inst = new CPU.Instruction(_system.Memory, addr);
+
+            if (inst.Length == 2)
+            {
+                Console.WriteLine("0x{0:x8}: 0x{1:x4}              {2}",
+                    addr,
+                    _system.Memory.ReadHalfWord(addr),
+                    Ridge.CPU.Disassembler.Disassemble(inst));
+            }
+            else if (inst.Length == 4)
+            {
+                Console.WriteLine("0x{0:x8}: 0x{1:x8}          {2}",
+                    addr,
+                    _system.Memory.ReadWord(addr),
+                    Ridge.CPU.Disassembler.Disassemble(inst));
+            }
+            else if (inst.Length == 6)
+            {
+                Console.WriteLine("0x{0:x8}: 0x{1:x8},0x{2:x4}   {3}",
+                    addr,
+                    _system.Memory.ReadWord(addr),
+                    _system.Memory.ReadHalfWord(addr + 4),
                     Ridge.CPU.Disassembler.Disassemble(inst));
             }
 

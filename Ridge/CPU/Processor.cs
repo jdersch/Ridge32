@@ -1,6 +1,7 @@
 ﻿using System;
 
 using Ridge.IO;
+using Ridge.Logging;
 using Ridge.Memory;
 
 namespace Ridge.CPU
@@ -69,12 +70,6 @@ namespace Ridge.CPU
             // to get it to load the appropriate data into main memory and start the CPU in kernel
             // mode in the correct location, with CCB set to 1.
             //
-
-            //
-            // TODO: kick I/O.  For now, we're testing with boot data pre-loaded into memory
-            // at the requisite location.
-            //
-
             _mode = ProcessorMode.Kernel;
             _pc = 0x3e000;
             _sr[11] = 1;
@@ -91,6 +86,7 @@ namespace Ridge.CPU
         public uint PC
         {
             get { return _pc; }
+            set { _pc = value; }
         }
 
         public uint[] R
@@ -124,7 +120,6 @@ namespace Ridge.CPU
             bool pageFault = false;
             Instruction i = new Instruction(_mem, _pc, out pageFault);
 
-            // Console.WriteLine("{0}, {1:x8}: {2}", _mode == ProcessorMode.Kernel ? "K" : "U", _pc, Disassembler.Disassemble(i));
 
             if (pageFault)
             {
@@ -158,7 +153,7 @@ namespace Ridge.CPU
 
                 case Opcode.SUB:
                     // TODO: traps on overflow
-                    _r[i.Rx]= (uint)((int)_r[i.Rx] - (int)_r[i.Ry]);
+                    _r[i.Rx] = (uint)((int)_r[i.Rx] - (int)_r[i.Ry]);
                     break;
 
                 case Opcode.MPY:
@@ -190,7 +185,7 @@ namespace Ridge.CPU
 
                 case Opcode.AND:
                     _r[i.Rx] &= _r[i.Ry];
-                    break;                
+                    break;
 
                 case Opcode.CBIT:
                     {
@@ -199,7 +194,7 @@ namespace Ridge.CPU
                         // the MSB is bit 0, LSB is 63...
                         ulong rp = GetRegisterPairValue(i.Rx);
                         rp &= ~(0x8000000000000000 >> (int)(_r[i.Ry] & 0x3f));
-                        SetRegisterPairValue(i.Rx, rp);                        
+                        SetRegisterPairValue(i.Rx, rp);
                     }
                     break;
 
@@ -208,7 +203,7 @@ namespace Ridge.CPU
                         // Sets the specified bit in the 64-bit register pair specified by Rx.
                         ulong rp = GetRegisterPairValue(i.Rx);
                         rp |= (0x8000000000000000 >> (int)(_r[i.Ry] & 0x3f));
-                        SetRegisterPairValue(i.Rx, rp);                        
+                        SetRegisterPairValue(i.Rx, rp);
                     }
                     break;
 
@@ -265,7 +260,7 @@ namespace Ridge.CPU
                     }
                     break;
 
-                
+
                 case Opcode.FIXR:
                 case Opcode.RNEG:
                 case Opcode.RADD:
@@ -273,7 +268,7 @@ namespace Ridge.CPU
                 case Opcode.RMPY:
                 case Opcode.RDIV:
                 case Opcode.MAKERD:
-                case Opcode.FLOAT:                
+                case Opcode.FLOAT:
                 case Opcode.DFIXT:
                 case Opcode.DFIXR:
                 case Opcode.DRNEG:
@@ -316,8 +311,16 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.EADD:
-                    long res = _r[i.Rx] + _r[i.Ry];
-                    _r[0] = (uint)((res & 0x100000000) != 0 ? 1 : 0);
+                    //
+                    // From the Dec. 86 proc reference:
+                    //  "Rx <- Rx + Ry + R0[31]
+                    //   R0[31] <- carry
+                    //   R0[30] <- overflow
+                    //                    
+                    // TODO: handle overflow
+                    long res = (int)_r[i.Rx] + (int)_r[i.Ry] + _r[0] & 0x1;
+                    bool carryOut = (res & 0x100000000) != 0;
+                    _r[0] = (uint)((carryOut ? 0x1 : 0x0));
                     _r[i.Rx] = (uint)res;
                     break;
 
@@ -338,15 +341,15 @@ namespace Ridge.CPU
 
                 case Opcode.EMPY:
                     SetRegisterPairValue(i.Rx, (ulong)_r[i.Rx] * (ulong)_r[i.Ry]);
-                    break;                
+                    break;
 
                 case Opcode.LCOMP:
-                    {                        
-                        if ((int)_r[i.Rx] < (int)_r[i.Ry])
+                    {   // "...compared using unsigned arithmetic."
+                        if (_r[i.Rx] < _r[i.Ry])
                         {
                             _r[i.Rx] = 0xffffffff;
                         }
-                        else if ((int)_r[i.Rx] == (int)_r[i.Ry])
+                        else if (_r[i.Rx] == _r[i.Ry])
                         {
                             _r[i.Rx] = 0;
                         }
@@ -401,8 +404,8 @@ namespace Ridge.CPU
                     if (_sr[14] != 1)
                     {
                         _mem.WriteWord(_sr[14] + 0x40, _sr[15]);        // sr15 or PC?
-                        _mem.WriteWord(_sr[14] + 0x44, (_sr[8] << 16) | (_sr[9] & 0xffff));
-                        _mem.WriteWord(_sr[14] + 0x4c, _sr[10]);
+                        //_mem.WriteWord(_sr[14] + 0x44, (_sr[8] << 16) | (_sr[9] & 0xffff));
+                        //_mem.WriteWord(_sr[14] + 0x4c, _sr[10]);                        
                         // TODO: process clock stuff.
 
                         uint currentReg = (uint)i.Rx;
@@ -478,7 +481,7 @@ namespace Ridge.CPU
                         Trap(TrapType.KernelViolation);
                         break;
                     }
-                    else
+                    else if (_sr[14] != 1)  // If SR14 = 1 no registers are loaded...
                     {
                         uint currentReg = (uint)i.Rx;
 
@@ -517,14 +520,9 @@ namespace Ridge.CPU
                     }
 
                     _sr[i.Rx] = _r[i.Ry];
-
-                    if (i.Rx == 8)
-                    {
-                        Console.WriteLine("sr8 = {0:x}", _sr[8]);
-                    }
                     break;
 
-                case Opcode.MOVE_r:
+                case Opcode.MOVE_rs:
                     if (_mode != ProcessorMode.Kernel)
                     {
                         Trap(TrapType.KernelViolation);
@@ -543,7 +541,7 @@ namespace Ridge.CPU
                     }
 
                     // Ry is used as the subop field.
-                    switch((MaintOpcode)i.Ry)
+                    switch ((MaintOpcode)i.Ry)
                     {
                         case MaintOpcode.ELOGR:
                             //
@@ -561,17 +559,24 @@ namespace Ridge.CPU
                             //   Load enable switch set                 31
                             // "
 
-                            // TODO: actually interface to all the above things.
-                            // Right now, just return 0 for everything, this indicates
-                            // that the load enable switch is off (so we just get dumped into RBUG)
-                            _r[i.Rx] = (uint)(_externalInterruptDevice != null ? 0x10 : 0x00);
+                            // For now the only thing that varies is the external interrupt bit.
+                            // The Memory error logging RAM data is hardcoded to always return 1 (no errors)
+                            // since at this time I'm not intending to simulate bad memory.
+                            // and the switches aren't yet hooked up.
+                            // TODO: hook up those switches
+                            Log.Write(LogType.Verbose, LogComponent.CPU, "ELOGR 0x{0:x}", _r[i.Rx]);
+                            _r[i.Rx] = (uint)((_externalInterruptDevice != null ? 0x10 : 0x00) | 0x8000);
+                            break;
+
+                        case MaintOpcode.ELOGW:
+                            Log.Write(LogType.Verbose, LogComponent.CPU, "ELOGW 0x{0:x}", _r[i.Rx]);
                             break;
 
                         case MaintOpcode.TRAPEXIT:
                             // "The TRAPEXIT instruction sets PC to the value contained in SR0 and begins
                             //  executing at that address...
                             //  The TRAPEXIT instruction flushes the cache and the TMT."
-                            _pc = _sr[0];                            
+                            _pc = _sr[0];
                             break;
 
                         case MaintOpcode.ITEST:
@@ -606,11 +611,17 @@ namespace Ridge.CPU
                             // At the current time we present things as the original Ridge32 CPU, old VRT, normal floating point
                             // with no user limit and serial number 1.
                             //
-                            _r[i.Rx] = 0x000100f0;
+                            _r[i.Rx] = 0x00010f00;
                             break;
 
                         case MaintOpcode.FLUSH:
                             // this is a no-op since we cache nothing at the moment.
+                            break;
+
+                        case MaintOpcode.VERSION:
+                            // The VERSION instruction returns the current microcode version number in Rx.
+                            // I don't know exactly what that looks like, yet.
+                            _r[i.Rx] = 0;
                             break;
 
                         default:
@@ -740,7 +751,7 @@ namespace Ridge.CPU
                     // Which is correct?  Only time will tell.
                     // For now, following the 1983 spec since it makes more sense.
                     //
-
+                    
                     // TODO: this could be done more efficiently.
                     {
                         uint signBit = _r[i.Rx] & 0x80000000;
@@ -755,7 +766,7 @@ namespace Ridge.CPU
                                 Trap(TrapType.ArithmeticTrap);
                             }
                         }
-                    }
+                    } 
                     break;
 
                 case Opcode.ASR:
@@ -1113,10 +1124,10 @@ namespace Ridge.CPU
 
                 default:
                     // Should eventually Trap.  Throw at the moment while debugging.
-                    /*
+                    
                     throw new NotImplementedException(
-                        String.Format("Unimplemented opcode {0:x8} ({1}).", (uint)i.Op, i.Op)); */
-                    SignalEvent(EventType.IllegalInstruction, (uint)i.Op, _sr[8], _pc);
+                        String.Format("Unimplemented opcode {0:x8} ({1}).", (uint)i.Op, i.Op)); 
+                    // SignalEvent(EventType.IllegalInstruction, (uint)i.Op, _sr[8], _pc);
                     break;
             }
 
@@ -1182,7 +1193,10 @@ namespace Ridge.CPU
         {            
             if ((address & 0x1) != 0)
             {
-                Trap(TrapType.DataAlignment);
+                SignalEvent(
+                    EventType.DataAlignment, 
+                    segment == SegmentType.Code ? _sr[8] : _sr[9],
+                    address);                
             }
             else
             {
@@ -1208,7 +1222,10 @@ namespace Ridge.CPU
         {            
             if ((address & 0x3) != 0)
             {
-                Trap(TrapType.DataAlignment);
+                SignalEvent(
+                    EventType.DataAlignment,
+                    segment == SegmentType.Code ? _sr[8] : _sr[9],
+                    address);
             }
             else
             {
@@ -1234,7 +1251,10 @@ namespace Ridge.CPU
         {            
             if ((address & 0x7) != 0)
             {
-                Trap(TrapType.DataAlignment);         
+                SignalEvent(
+                    EventType.DataAlignment,
+                    segment == SegmentType.Code ? _sr[8] : _sr[9],
+                    address);
             }
             else
             {
@@ -1273,7 +1293,10 @@ namespace Ridge.CPU
         {            
             if ((address & 0x1) != 0)
             {
-                Trap(TrapType.DataAlignment);
+                SignalEvent(
+                    EventType.DataAlignment,
+                    _sr[9],
+                    address);
             }
             else
             {
@@ -1293,7 +1316,10 @@ namespace Ridge.CPU
         {            
             if ((address & 0x3) != 0)
             {
-                Trap(TrapType.DataAlignment);
+                SignalEvent(
+                    EventType.DataAlignment,
+                    _sr[9],
+                    address);
             }
             else
             {
@@ -1313,7 +1339,10 @@ namespace Ridge.CPU
         {
             if ((address & 0x7) != 0)
             {
-                Trap(TrapType.DataAlignment);
+                SignalEvent(
+                    EventType.DataAlignment,
+                    _sr[9],
+                    address);
             }
             else
             {
@@ -1369,6 +1398,21 @@ namespace Ridge.CPU
                 case EventType.KCALL:
                     _sr[15] = _pc;                 // Next PC after KCALL
                     e = (EventType)(d0 * 4);       // calculate CCB address                    
+                    break;
+
+                case EventType.DataAlignment:
+                    if (_mode == ProcessorMode.Kernel)
+                    {
+                        _sr[0] = _opc;            // Current PC
+                    }
+                    else
+                    {
+                        _sr[0] = 1;
+                        _sr[15] = _opc;             // Current PC
+                    }
+                    
+                    _sr[2] = d0;    // segment
+                    _sr[3] = d1;    // address
                     break;
 
                 case EventType.IllegalInstruction:
@@ -1474,6 +1518,8 @@ namespace Ridge.CPU
                 // Switch to Kernel mode and jump to the requisite vector.
                 _mode = ProcessorMode.Kernel;
                 _pc = vectorAddress;
+
+                //Program.Hackeroo = true;
             }
         }
 
@@ -1520,8 +1566,12 @@ namespace Ridge.CPU
 
         private void Trap(TrapType t)
         {
-            Console.WriteLine(t);
-            throw new NotImplementedException("Traps not yet implemented.");
+            // TODO: check traps word to see if traps are enabled, etc.
+            switch (t)
+            { 
+                default:
+                    throw new NotImplementedException(String.Format("Unimplemented trap {0}", t));
+            }
         }
 
         //

@@ -84,7 +84,7 @@ namespace Ridge.CPU
         TRANS       = 0x44,
         DIRT        = 0x45,
         MOVE_sr     = 0x46,
-        MOVE_r      = 0x47,
+        MOVE_rs     = 0x47,
         MAINT       = 0x4c,
         READ        = 0x4e,
         WRITE       = 0x4f,

@@ -54,6 +54,7 @@
     <Compile Include="IO\FDLP.cs" />
     <Compile Include="IO\IIODevice.cs" />
     <Compile Include="IO\IOBus.cs" />
+    <Compile Include="Logging\Log.cs" />
     <Compile Include="Memory\IPhysicalMemory.cs" />
     <Compile Include="Memory\IVirtualMemory.cs" />
     <Compile Include="Memory\MemoryController.cs" />

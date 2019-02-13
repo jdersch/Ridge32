@@ -17,10 +17,6 @@ namespace Ridge
             Console.CancelKeyPress += OnBreak;
 
             Console.WriteLine("Yet-To-Be-Named Ridge emulator v0.0.\n");
-
-            
-            // Read in boot data from FDLP (TODO: base this on LOAD switch, etc.)
-            system.FDLP.Boot();
             
 
             DebugPrompt debugger = new DebugPrompt(system);
@@ -52,12 +48,12 @@ namespace Ridge
                         break;
 
                 }
-
-                if (Hackeroo) // || system.CPU.PC == 0x0004341e)
+                                
+                if (Hackeroo)
                 {
                    _execState = ExecutionState.Step;
                    Hackeroo = false;
-                }
+                } 
             }            
         }
 

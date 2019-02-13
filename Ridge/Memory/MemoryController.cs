@@ -28,14 +28,7 @@ namespace Ridge.Memory
         //
         public byte ReadByte(uint address)
         {
-            if (address < _mem.Length)
-            {
-                return _mem[address];
-            }
-            else
-            {        
-                return 0x00;
-            }
+            return _mem[address & (_mem.Length - 1)];
         }        
 
         public ushort ReadHalfWord(uint address)
@@ -58,10 +51,7 @@ namespace Ridge.Memory
 
         public void WriteByte(uint address, byte b)
         {
-            if(address < _mem.Length)
-            {
-                _mem[address] = b;
-            }
+            _mem[address & (_mem.Length - 1)] = b;
         }
 
         public void WriteHalfWord(uint address, ushort h)
@@ -79,7 +69,8 @@ namespace Ridge.Memory
         }
 
         public void WriteDoubleWord(uint address, ulong d)
-        {            WriteWord(address, (uint)(d >> 32));
+        {
+            WriteWord(address, (uint)(d >> 32));
             WriteWord(address + 4, (uint)d);
         }
 
@@ -158,9 +149,9 @@ namespace Ridge.Memory
                 {
                     //
                     // We have a match!  Check the validity bits.
-                    // If 0, this is invalid and we take a page-fault
+                    // If unset, this is invalid and we take a page-fault
                     //
-                    if ((vrtEntry1 & 0x7000) == 0)
+                    if ((vrtEntry1 & 0x7000) != 0x7000)
                     {
                         pageFault = true;
                         break;
