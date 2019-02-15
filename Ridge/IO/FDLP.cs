@@ -49,8 +49,9 @@ namespace Ridge.IO
             // single characters.  appx. 833333ns per character at 9600 baud.
             _characterOutEvent = new Event(0, null, CharacterOutCallback);
             _floppyActionEvent = new Event(0, null, FloppyActionCallback);
-            
+
             _floppyDisk = new FloppyDisk("F:\\software\\ridge\\ROS\\ROS35\\004-2761.imd");
+            //_floppyDisk = new FloppyDisk("F:\\software\\ridge\\ROS\\ROS_3.3_IMD\\ROS_3.3_IMD\\002-4218.imd");            
             //_floppyDisk = new FloppyDisk("Disks\\sus.imd");
         }
 

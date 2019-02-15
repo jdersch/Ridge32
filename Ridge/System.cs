@@ -13,7 +13,7 @@ namespace Ridge
         {
             _scheduler = new Scheduler();
 
-            _mem = new Memory.MemoryController(8192);            
+            _mem = new Memory.MemoryController(8192);
             _io = new IOBus();
             _cpu = new Processor(_mem, _io);
             _mem.AttachCPU(_cpu);
@@ -21,6 +21,9 @@ namespace Ridge
             // Attach IO devices
             _fdlp = new FDLP(0x1, this);
             _io.RegisterDevice(0x1, _fdlp);
+
+            _priamController = new PriamDiskController(0x2, this);
+            _io.RegisterDevice(0x2, _priamController);
 
             //_display = new Display(0x4, this);
             //_io.RegisterDevice(0x4, _display);
@@ -64,6 +67,11 @@ namespace Ridge
             get { return _fdlp; }
         }
 
+        public PriamDiskController PriamController
+        {
+            get { return _priamController; }
+        }
+
         public Scheduler Scheduler
         {
             get { return _scheduler; }
@@ -76,6 +84,7 @@ namespace Ridge
         // IO devices
         private FDLP _fdlp;
         private Display _display;
+        private PriamDiskController _priamController;
 
         // System scheduler
         private Scheduler _scheduler;

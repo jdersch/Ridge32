@@ -20,7 +20,13 @@ namespace Ridge.CPU
         KernelViolation,
         Check,
         TrapInstruction,
-        ArithmeticTrap,
+        IntegerOverflow,
+        IntegerDivideByZero,
+        RealOverflow,
+        RealUnderflow,
+        RealDivideByZero,
+        InexactResult,
+        Before,
     }
 
     public enum EventType
@@ -162,13 +168,25 @@ namespace Ridge.CPU
                     break;
 
                 case Opcode.DIV:
-                    // TODO: traps on div by zero
-                    _r[i.Rx] = (uint)((int)_r[i.Rx] / (int)_r[i.Ry]);
+                    if (_r[i.Ry] == 0)
+                    {
+                        Trap(TrapType.IntegerDivideByZero, i);
+                    }
+                    else
+                    {
+                        _r[i.Rx] = (uint)((int)_r[i.Rx] / (int)_r[i.Ry]);
+                    }
                     break;
 
                 case Opcode.REM:
-                    // TODO: traps on div by zero
-                    _r[i.Rx] = (uint)((int)_r[i.Rx] % (int)_r[i.Ry]);
+                    if (_r[i.Ry] == 0)
+                    {
+                        Trap(TrapType.IntegerDivideByZero, i);
+                    }
+                    else
+                    {
+                        _r[i.Rx] = (uint)((int)_r[i.Rx] % (int)_r[i.Ry]);
+                    }
                     break;
 
                 case Opcode.NOT:
@@ -220,7 +238,7 @@ namespace Ridge.CPU
                     // TODO: manual conflicts on this, actually...
                     if ((int)_r[i.Rx] > (int)_r[i.Ry])
                     {
-                        Trap(TrapType.Check);
+                        Trap(TrapType.Check, i);
                     }
                     break;
 
@@ -256,36 +274,78 @@ namespace Ridge.CPU
                     // Trap if NOT (0 <= (Rx) <= Ry)
                     if (!(0 <= (int)_r[i.Rx] && (int)_r[i.Rx] <= i.Ry))
                     {
-                        Trap(TrapType.Check);
+                        Trap(TrapType.Check, i);
                     }
                     break;
 
-
-                case Opcode.FIXR:
-                case Opcode.RNEG:
-                case Opcode.RADD:
-                case Opcode.RSUB:
-                case Opcode.RMPY:
-                case Opcode.RDIV:
-                case Opcode.MAKERD:
-                case Opcode.FLOAT:
-                case Opcode.DFIXT:
-                case Opcode.DFIXR:
-                case Opcode.DRNEG:
-                case Opcode.DRADD:
-                case Opcode.DRSUB:
-                case Opcode.DRMPY:
-                case Opcode.DRDIV:
-                case Opcode.MAKEDR:
-                case Opcode.DFLOAT:
+                //
+                // Floating point (single / double precision) follow.
+                // This implementation is incomplete in that none of the exceptions
+                // are implemented for the IEEE standard as implemented on the Ridge.
+                // This should be done, but is a lot of work.
+                //
+                
+                case Opcode.MAKERD:                                
+                case Opcode.MAKEDR:                
                 case Opcode.DRCOMP:
                     throw new NotImplementedException();
 
+                case Opcode.FIXR: // TODO: actually round
                 case Opcode.FIXT:
-                    //float fVal = GetFloatFromWord(_r[i.Ry]);
-                    //_r[i.Rx] = Convert.ToUInt32(fVal);
-                    throw new NotImplementedException("FIXT");
+                    float fVal = GetFloatFromFloatWord(_r[i.Ry]);
+                    _r[i.Rx] = Convert.ToUInt32(fVal);
                     break;
+
+                case Opcode.RNEG:
+                    {
+                        float fy = GetFloatFromFloatWord(_r[i.Ry]);
+                        _r[i.Rx] = GetFloatWordFromFloat(-fy);
+                    }
+                    break;
+
+                case Opcode.RADD:
+                    {
+                        float fx = GetFloatFromFloatWord(_r[i.Rx]);
+                        float fy = GetFloatFromFloatWord(_r[i.Ry]);
+                        _r[i.Rx] = GetFloatWordFromFloat(fx + fy);
+                    }
+                    break;
+
+                case Opcode.RSUB:
+                    {
+                        float fx = GetFloatFromFloatWord(_r[i.Rx]);
+                        float fy = GetFloatFromFloatWord(_r[i.Ry]);
+                        _r[i.Rx] = GetFloatWordFromFloat(fx - fy);
+                    }
+                    break;
+
+                case Opcode.RMPY:
+                    {
+                        float fx = GetFloatFromFloatWord(_r[i.Rx]);
+                        float fy = GetFloatFromFloatWord(_r[i.Ry]);
+                        _r[i.Rx] = GetFloatWordFromFloat(fx * fy);
+                    }
+                    break;
+
+                case Opcode.RDIV:
+                    {
+                        float fx = GetFloatFromFloatWord(_r[i.Rx]);
+                        float fy = GetFloatFromFloatWord(_r[i.Ry]);
+
+                        if (fy == 0.0f)
+                        {
+                            Trap(TrapType.RealDivideByZero, i);
+                        }
+                        else
+                        {
+                            _r[i.Rx] = GetFloatWordFromFloat(fx / fy);
+                        }
+                    }
+                    break;
+
+                case Opcode.FLOAT:
+                    _r[i.Rx] = GetFloatWordFromInteger((int)_r[i.Ry]);
+                    break;                
 
                 case Opcode.RCOMP:
                     throw new NotImplementedException("RCOMP");
@@ -310,22 +370,88 @@ namespace Ridge.CPU
                     } */
                     break;
 
+                case Opcode.DFIXT:
+                case Opcode.DFIXR:
+                    {
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+                        _r[i.Rx] = Convert.ToUInt32(dy);
+                    }
+                    break;
+
+                case Opcode.DRNEG:
+                    {
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+                        SetRegisterPairValue(i.Rx, GetDoubleWordFromDouble(-dy));
+                    }
+                    break;
+
+                case Opcode.DRADD:
+                    {
+                        double dx = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Rx));
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+                        SetRegisterPairValue(i.Rx, GetDoubleWordFromDouble(dx + dy));
+                    }
+                    break;
+
+                case Opcode.DRSUB:
+                    {
+                        double dx = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Rx));
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+                        SetRegisterPairValue(i.Rx, GetDoubleWordFromDouble(dx - dy));
+                    }
+                    break;
+
+                case Opcode.DRMPY:
+                    {
+                        double dx = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Rx));
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+                        SetRegisterPairValue(i.Rx, GetDoubleWordFromDouble(dx * dy));
+                    }
+                    break;
+
+                case Opcode.DRDIV:
+                    {
+                        double dx = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Rx));
+                        double dy = GetDoubleFromDoubleWord(GetRegisterPairValue(i.Ry));
+
+                        if (dy == 0.0f)
+                        {
+                            Trap(TrapType.RealDivideByZero, i);
+                        }
+                        else
+                        {
+                            SetRegisterPairValue(i.Rx, GetDoubleWordFromDouble(dx / dy));
+                        }
+                    }
+                    break;
+
+                case Opcode.DFLOAT:
+                    SetRegisterPairValue(i.Rx, GetDoubleWordFromInteger((int)_r[i.Ry]));
+                    break;
+
                 case Opcode.EADD:
-                    //
-                    // From the Dec. 86 proc reference:
-                    //  "Rx <- Rx + Ry + R0[31]
-                    //   R0[31] <- carry
-                    //   R0[30] <- overflow
-                    //                    
-                    // TODO: handle overflow
-                    long res = (int)_r[i.Rx] + (int)_r[i.Ry] + _r[0] & 0x1;
-                    bool carryOut = (res & 0x100000000) != 0;
-                    _r[0] = (uint)((carryOut ? 0x1 : 0x0));
-                    _r[i.Rx] = (uint)res;
+                    {
+                        //
+                        // From the Dec. 86 proc reference:
+                        //  "Rx <- Rx + Ry + R0[31]
+                        //   R0[31] <- carry
+                        //   R0[30] <- overflow  (earlier refs do not mention this)
+                        //                    
+                        // TODO: handle overflow
+                        long res = (int)_r[i.Rx] + (int)_r[i.Ry] + (_r[0] & 0x1);
+                        bool carryOut = (res & 0x100000000) != 0;
+                        _r[0] = (uint)((carryOut ? 0x1 : 0x0));
+                        _r[i.Rx] = (uint)res;
+                    }
                     break;
 
                 case Opcode.ESUB:
-                    throw new NotImplementedException("ESUB");
+                    {
+                        long res = (int)_r[i.Rx] - (int)_r[i.Ry] - (_r[0] & 0x1);
+                        bool carryOut = (res & 0x100000000) != 0;
+                        _r[0] = (uint)((carryOut ? 0x1 : 0x0));
+                        _r[i.Rx] = (uint)res;
+                    }
                     break;
 
                 case Opcode.EDIV:
@@ -382,13 +508,13 @@ namespace Ridge.CPU
 
                 case Opcode.TRAP:
                     _sr[3] = (uint)i.Ry;
-                    Trap(TrapType.TrapInstruction);
+                    Trap(TrapType.TrapInstruction, i);
                     break;
 
                 case Opcode.SUS:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -422,7 +548,7 @@ namespace Ridge.CPU
                 case Opcode.LUS:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
                     
@@ -460,7 +586,7 @@ namespace Ridge.CPU
                 case Opcode.RUM:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -478,7 +604,7 @@ namespace Ridge.CPU
                 case Opcode.LDREGS:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
                     else if (_sr[14] != 1)  // If SR14 = 1 no registers are loaded...
@@ -497,7 +623,7 @@ namespace Ridge.CPU
                 case Opcode.DIRT:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -515,7 +641,7 @@ namespace Ridge.CPU
                 case Opcode.MOVE_sr:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -525,7 +651,7 @@ namespace Ridge.CPU
                 case Opcode.MOVE_rs:
                     if (_mode != ProcessorMode.Kernel)
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -536,7 +662,7 @@ namespace Ridge.CPU
                     if (!(_mode == ProcessorMode.Kernel ||  // Not kernel mode
                          PrivilegedAccess()))           // Not privileged user mode
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -634,7 +760,7 @@ namespace Ridge.CPU
                     if (_mode != ProcessorMode.Kernel &&
                         !PrivilegedAccess())
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -649,7 +775,7 @@ namespace Ridge.CPU
                     if (_mode != ProcessorMode.Kernel &&
                         !PrivilegedAccess())
                     {
-                        Trap(TrapType.KernelViolation);
+                        Trap(TrapType.KernelViolation, i);
                         break;
                     }
 
@@ -763,7 +889,7 @@ namespace Ridge.CPU
 
                             if (signBit != newSignBit)
                             {
-                                Trap(TrapType.ArithmeticTrap);
+                                Trap(TrapType.IntegerOverflow, i);
                             }
                         }
                     } 
@@ -832,7 +958,7 @@ namespace Ridge.CPU
 
                             if (signBit != newSignBit)
                             {
-                                Trap(TrapType.ArithmeticTrap);
+                                Trap(TrapType.IntegerOverflow, i);
                             }
                         }
                     }
@@ -1480,6 +1606,14 @@ namespace Ridge.CPU
                     _sr[3] = d2;
                     break;
 
+                case EventType.ArithmeticTrap:
+                    _sr[0] = 1;
+                    _sr[1] = d0;
+                    _sr[2] = d1;
+                    _sr[3] = d2;
+                    _sr[15] = _opc;
+                    break;
+
                 case EventType.Timer1Interrupt:
                 case EventType.Timer2Interrupt:
                     // Only takes effect in user mode
@@ -1564,13 +1698,23 @@ namespace Ridge.CPU
             return (_sr[10] & 0x1) != 0;
         }
 
-        private void Trap(TrapType t)
+        private void Trap(TrapType t, Instruction i)
         {
-            // TODO: check traps word to see if traps are enabled, etc.
-            switch (t)
-            { 
-                default:
-                    throw new NotImplementedException(String.Format("Unimplemented trap {0}", t));
+            if (_mode == ProcessorMode.User)
+            {
+                switch (t)
+                {
+                    case TrapType.IntegerDivideByZero:
+                        // Enabled by bit 17 of SR10
+                        if ((_sr[10] & 0x8000) != 0)
+                        {
+                            SignalEvent(EventType.ArithmeticTrap, (uint)i.Op, (uint)(i.Rx << 4 | i.Ry), 20);
+                        }
+                        break;
+
+                    default:
+                        throw new NotImplementedException(String.Format("Unimplemented trap {0}", t));
+                }
             }
         }
 
@@ -1580,28 +1724,34 @@ namespace Ridge.CPU
         // which will need to be corrected in order to properly deal
         // with the various exceptions the Ridge cpu supports...
         //
-        private float GetFloatFromWord(uint w)
+        private float GetFloatFromFloatWord(uint w)
         {
-            _float[0] = (byte)(w >> 24);
-            _float[1] = (byte)(w >> 16);
-            _float[2] = (byte)(w >> 8);
-            _float[3] = (byte)w;
-
-            return BitConverter.ToSingle(_float, 0);
+            return BitConverter.ToSingle(BitConverter.GetBytes(w), 0);
         }
 
-        private double GetDoubleFromWord(ulong w)
+        private uint GetFloatWordFromFloat(float f)
         {
-            _float[0] = (byte)(w >> 56);
-            _float[1] = (byte)(w >> 48);
-            _float[2] = (byte)(w >> 40);
-            _float[3] = (byte)(w >> 32);
-            _float[4] = (byte)(w >> 24);
-            _float[5] = (byte)(w >> 16);
-            _float[6] = (byte)(w >> 8);
-            _float[7] = (byte)w;
+            return BitConverter.ToUInt32(BitConverter.GetBytes(f), 0);
+        }
 
-            return BitConverter.ToDouble(_float, 0);
+        private uint GetFloatWordFromInteger(int i)
+        {
+            return BitConverter.ToUInt32(BitConverter.GetBytes((float)i), 0);
+        }
+
+        private double GetDoubleFromDoubleWord(ulong w)
+        {
+            return BitConverter.ToDouble(BitConverter.GetBytes(w), 0);
+        }
+
+        private ulong GetDoubleWordFromDouble(double d)
+        {
+            return BitConverter.ToUInt64(BitConverter.GetBytes(d), 0);
+        }
+
+        private ulong GetDoubleWordFromInteger(int i)
+        {
+            return BitConverter.ToUInt64(BitConverter.GetBytes((double)i), 0);
         }
 
         private ProcessorMode _mode;

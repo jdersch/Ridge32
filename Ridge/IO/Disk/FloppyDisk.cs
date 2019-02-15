@@ -45,7 +45,7 @@ namespace Ridge.IO.Disk
         /// <param name="head"></param>
         /// <param name="sector"></param>
         /// <returns></returns>
-        public Sector GetSector(int cylinder, int head, int sector)
+        public FloppySector GetSector(int cylinder, int head, int sector)
         {
             return _tracks[head, cylinder].ReadSector(sector);
         }
@@ -147,11 +147,11 @@ namespace Ridge.IO.Disk
             _head = head;
             _sectorCount = sectorCount;
             _sectorSize = sectorSize;
-            _sectors = new Sector[_sectorCount];
+            _sectors = new FloppySector[_sectorCount];
 
             for (int i = 0; i < _sectorCount; i++)
             {
-                _sectors[i] = new Sector(_sectorSize, _format);
+                _sectors[i] = new FloppySector(_sectorSize, _format);
             }
         }
 
@@ -210,7 +210,7 @@ namespace Ridge.IO.Disk
             //
             // Read the sector data in.
             //
-            _sectors = new Sector[_sectorCount];
+            _sectors = new FloppySector[_sectorCount];
             for (int i = 0; i < _sectorCount; i++)
             {
                 SectorRecordType type = (SectorRecordType)s.ReadByte();
@@ -226,7 +226,7 @@ namespace Ridge.IO.Disk
                     case SectorRecordType.NormalDeleted:
                     case SectorRecordType.NormalError:
                     case SectorRecordType.DeletedError:
-                        _sectors[_sectorOrdering[i] - 1] = new Sector(_sectorSize, _format, s);
+                        _sectors[_sectorOrdering[i] - 1] = new FloppySector(_sectorSize, _format, s);
                         break;
 
                     case SectorRecordType.Compressed:
@@ -236,7 +236,7 @@ namespace Ridge.IO.Disk
                         compressedData = (byte)s.ReadByte();
 
                         // Fill sector with compressed data
-                        _sectors[_sectorOrdering[i] - 1] = new Sector(_sectorSize, _format, compressedData);
+                        _sectors[_sectorOrdering[i] - 1] = new FloppySector(_sectorSize, _format, compressedData);
                         break;
 
                     default:
@@ -270,7 +270,7 @@ namespace Ridge.IO.Disk
             get { return _format; }
         }
 
-        public Sector ReadSector(int sector)
+        public FloppySector ReadSector(int sector)
         {
             return _sectors[sector];
         }
@@ -307,20 +307,20 @@ namespace Ridge.IO.Disk
 
         private List<int> _sectorOrdering;
 
-        private Sector[] _sectors;
+        private FloppySector[] _sectors;
 
         private static int[] _sectorSizes = { 128, 256, 512, 1024, 2048, 4096, 8192 };
     }
 
-    public class Sector
+    public class FloppySector
     {
-        public Sector(int sectorSize, Format format)
+        public FloppySector(int sectorSize, Format format)
         {
             _data = new byte[sectorSize];
             _format = format;
         }
 
-        public Sector(int sectorSize, Format format, byte compressedValue)
+        public FloppySector(int sectorSize, Format format, byte compressedValue)
             : this(sectorSize, format)
         {
             for (int i = 0; i < _data.Length; i++)
@@ -329,7 +329,7 @@ namespace Ridge.IO.Disk
             }
         }
 
-        public Sector(int sectorSize, Format format, Stream s)
+        public FloppySector(int sectorSize, Format format, Stream s)
             : this(sectorSize, format)
         {
             int read = s.Read(_data, 0, sectorSize);

@@ -1,60 +1,18 @@
-﻿Current issue:  (1/9/19)
-
-Boot from floppy dies after reading a few sectors in; a command sent to the FLDP is bogus in a couple of ways:
-
-1) it appears to be a floppy sector read command
-2) it is written to the wrong address in the DCB (terminal port 0 @ 3c000 rather than @ 3c0c0)
-3) the command is 0x80 rather than 0x86
-
-Command is clearly a floppy sector read command and cannot be properly interpreted as a terminal buffer cmd.
-
-
-
-2941493: CPU: U, 00000bc2: LADDR r14,r14+0x30,L
-2941494: CPU: U, 00000bc8: LOAD r0,r15+0x18
-2941495: CPU: U, 00000bcc: LOAD r1,r15+0x20
-2941496: CPU: U, 00000bd0: LOAD r2,r15+0x28
-2941497: CPU: U, 00000bd4: STORE r0,r14,0x18
-2941498: CPU: U, 00000bd8: STORE r1,r14,0x20
-2941499: CPU: U, 00000bdc: STORE r2,r14,0x28
-2941500: CPU: U, 00000be0: CALL r11,0x13bf0,L [0x147d0]     (be0 = pa 0x45be0)
-2941501: CPU: U, 000147d0: Illegal Opcode 0x00000000 (1)
-Execution error: Unimplemented opcode 00000000 (Invalid).
-R0-R16:
-0x000010c0 0x000010c8 0x000010c8 0xffff9c28 0xffff4ff8 0x00000986 0xffff9c28 0x0000098a
-0x00000000 0x00000020 0x0000187c 0x00000be6 0x00005490 0x00000004 0x00005450 0x00005420
-SR0-SR16:
-0x00000001 0x00000000 0x00800000 0x00000000 0x00000000 0x00000000 0x00000000 0x00000000
-0x00000080 0x000001c0 0x80000001 0x00000048 0x00003e88 0x000000ff 0x00002eb0 0x0000ed9e
-PC=0x000147d2 Mode=User
-0x000147d2: 0x0000              Illegal Opcode 0x00000000 (1)   (pa 0x597d2)
-
-
-
-:]> dv 3fc3a 50
-0x0003fc3a: 0x114f              MOVEI r4,0xf                <- R4 (loop end val) gets 0xf
-0x0003fc3c: 0xa74f002c          STORE r4,r15,0x2c
-0x0003fc40: 0x88430050          BR r4<=r3,0x50 [0x3fc90]
-0x0003fc44: 0x01c3              MOVE r12,r3                 <- R12 gets 1 (loop index)
-0x0003fc46: 0xd6500003,0xfff4   LOAD r5,0x3fff4,L           <- R5 gets 0x2000 (from boot load)
-0x0003fc4c: 0x01d5              MOVE r13,r5                 <- R13 gets 0x2000
-0x0003fc4e: 0x01b4              MOVE r11,r4                 <- R11 gets 0xf (loop end val)
-; top of loop
-0x0003fc50: 0x010c              MOVE r0,r12                 <- R0 gets loop index
-0x0003fc52: 0xce800060          LADDR r8,0x60               <- R8 gets 0x60
-0x0003fc56: 0x0508              MPY r0,r8                   <- R0 gets loop index * 0x60
-0x0003fc58: 0xdf100003,0xd800   LADDR r1,r0+0x3d800,L       <- R1 gets 0x3d800 + loop index * 0x60
-0x0003fc5e: 0x031d              ADD r1,r13                  <- R1 gets 0x2000 + R13 (0x3f800 + loop index * 0x60)  -- 3f800 has some empty data but appears to be mostly code
-0x0003fc60: 0xd6200003,0xfffc   LOAD r2,0x3fffc,L           <- R2 gets 0
-0x0003fc66: 0x013c              MOVE r3,r12                 <- R3 gets index
-0x0003fc68: 0x1431              SUBI r3,0x1                 <- decrement index
-0x0003fc6a: 0xce80005f          LADDR r8,0x5f               <- r8 gets 0x5f
-0x0003fc6e: 0x0538              MPY r3,r8                   <- r3 gets r3 * 0x5f
-0x0003fc70: 0x0323              ADD r2,r3                   <- add to r2 (0), so r3 * 0x5f
-0x0003fc72: 0xc14f0018          LOADB r4,r15+0x18           <- R15 has 43004; load byte from 4301c (0x52)
-0x0003fc76: 0x0324              ADD r2,r4                   <- add to r2 (r3 * 0x5f + 0x52)
-0x0003fc78: 0xc152ffe0          LOADB r5,r2+0xffffffe0      <- read byte from r2 - 20
-0x0003fc7c: 0xa1510000          STOREB r5,r1,0x0            <- store at r1
-0x0003fc80: 0x13c1              ADDI r12,0x1                <- prev instruction overwrites 3fc80 with c3; eats flaming death
-0x0003fc82: 0x8acbffcf          BR r12<>r11,0xffffffcf [0x3fc50]    <- loop gets to 0xc before the above happens
-0x0003fc86: 0xa7cf0028          STORE r12,r15,0x28
+﻿pattern = 00000001 -- rotated  000005F4 : AA55117F   AA55117D
+compare errors = 1
+.000005F8 : AE55117E   AA55117E
+compare errors = 1
+.000005F8 : AA5D117E   AA55117E
+compare errors = 1
+.000005F8 : AA55017E   AA55117E
+compare errors = 1
+.000005F8 : AA55115E   AA55117E
+compare errors = 1
+.000005FC : EA55117F   AA55117F
+compare errors = 1
+.000005FC : AAD5117F   AA55117F
+compare errors = 1
+.000005FC : AA54117F   AA55117F
+compare errors = 1
+.000005FC : AA55137F   AA55117F
+compare errors = 1

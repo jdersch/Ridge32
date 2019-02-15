@@ -49,11 +49,13 @@
     <Compile Include="CPU\Processor.cs" />
     <Compile Include="Debugger\Debugger.cs" />
     <Compile Include="IO\Disk\FloppyDisk.cs" />
+    <Compile Include="IO\Disk\PriamDisk.cs" />
     <Compile Include="IO\Display.cs" />
     <Compile Include="IO\DisplayWindow.cs" />
     <Compile Include="IO\FDLP.cs" />
     <Compile Include="IO\IIODevice.cs" />
     <Compile Include="IO\IOBus.cs" />
+    <Compile Include="IO\PriamDiskController.cs" />
     <Compile Include="Logging\Log.cs" />
     <Compile Include="Memory\IPhysicalMemory.cs" />
     <Compile Include="Memory\IVirtualMemory.cs" />

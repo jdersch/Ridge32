@@ -18,7 +18,7 @@ namespace Ridge.Logging
         IOBus = 0x8,
         Display = 0x10,
         FDLP = 0x20,
-        
+        Priam = 0x40,
 
         All = 0x7fffffff
     }
@@ -45,7 +45,7 @@ namespace Ridge.Logging
         static Log()
         {
             Enabled = false;
-            _components = LogComponent.FDLP | LogComponent.CPU | LogComponent.Display;
+            _components = LogComponent.None; // | LogComponent.Priam;
             _type = LogType.All;
             _logIndex = 0;
         }
